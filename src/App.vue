@@ -2,6 +2,7 @@
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import Slider from "./components/Slider.vue";
+import Tooltip from "./components/Tooltip.vue";
 
 const greetMsg = ref("");
 const name = ref("");
@@ -14,19 +15,20 @@ async function greet() {
 
 <template>
   <main class="container">
+    <Tooltip />
     <Slider />
   </main>
 </template>
 
 <style>
 :root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
+  font-family: "Open Sans", Inter, Avenir, Helvetica, Arial, sans-serif;
+
   font-size: 16px;
-  line-height: 24px;
-  font-weight: 400;
 
   color: #0f0f0f;
-  background-color: #f6f6f6;
+
+  background-image: url("./assets/aa.png");
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
