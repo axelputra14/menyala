@@ -28,7 +28,7 @@ async function greet() {
 
   color: #0f0f0f;
 
-  background-image: url("./assets/aa.png");
+  background-image: url("./assets/aa.jpg");
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;

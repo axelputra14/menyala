@@ -1,20 +1,49 @@
-<script>
+<script setup>
 import { useKeenSlider } from "keen-slider/vue.es";
 import "keen-slider/keen-slider.min.css";
 
-export default {
-  setup() {
-    const [container] = useKeenSlider({
-      loop: true,
-      mode: "free",
-      slides: {
-        perView: "auto",
-        spacing: 16,
-      },
-    });
-    return { container };
-  },
+const wheelControls = (slider) => {
+  let touchTimeout;
+  let position = { x: 0 };
+  let wheelActive = false;
+
+  const dispatch = (e, name) => {
+    // Use vertical wheel movement to drag horizontally
+    position.x -= e.deltaY;
+    slider.container.dispatchEvent(
+      new CustomEvent(name, { detail: { x: position.x, y: 0 } })
+    );
+  };
+
+  const eventWheel = (e) => {
+    e.preventDefault();
+    if (!wheelActive) {
+      position = { x: 0 };
+      dispatch(e, "ksDragStart");
+      wheelActive = true;
+    }
+    dispatch(e, "ksDrag");
+    clearTimeout(touchTimeout);
+    touchTimeout = setTimeout(() => {
+      wheelActive = false;
+      dispatch(e, "ksDragEnd");
+    }, 50);
+  };
+
+  slider.on("created", () => {
+    slider.container.addEventListener("wheel", eventWheel, { passive: false });
+  });
 };
+
+const [container] = useKeenSlider(
+  {
+    loop: true,
+    mode: "snap",
+    rubberband: false,
+    slides: { perView: "auto", spacing: 16 },
+  },
+  [wheelControls]
+);
 </script>
 
 <template>
