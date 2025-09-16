@@ -148,7 +148,7 @@ body {
 
 .slide-items:hover svg,
 .slide-items:hover img {
-  transform: translateY(-8px) scale(1);
+  transform: translateY(-5px) scale(1.05);
 }
 
 .slide-items svg.loading,
