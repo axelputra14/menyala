@@ -1,22 +1,26 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import Slider from "./components/Slider.vue";
 import Tooltip from "./components/Tooltip.vue";
 
-const greetMsg = ref("");
-const name = ref("");
+const appList = ref([]);
+const apps: any = ref([]);
 
-async function greet() {
-  // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-  greetMsg.value = await invoke("greet", { name: name.value });
+async function getApps() {
+  appList.value = await invoke("get_apps", { apps: apps.value });
+  console.log(apps.value);
 }
+
+onMounted(() => {
+  getApps();
+});
 </script>
 
 <template>
   <main class="container">
     <Tooltip />
-    <Slider />
+    <Slider :items="appList" />
   </main>
 </template>
 
