@@ -3,6 +3,7 @@ import { useKeenSlider } from "keen-slider/vue.es";
 import "keen-slider/keen-slider.min.css";
 import { useFetchStore } from "../stores/fetch";
 import Tooltip from "./Tooltip.vue";
+import { onMounted } from "vue";
 
 const fetchStore = useFetchStore();
 

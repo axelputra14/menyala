@@ -7,7 +7,7 @@ export const useFetchStore = defineStore("fetch", () => {
 
   async function getApps() {
     appList.value = await invoke("get_apps");
-    console.log(appList.value);
+    console.log("ini applist: ", appList.value);
   }
 
   return { appList, getApps };

@@ -37,24 +37,37 @@ fn get_apps(app: tauri::AppHandle) -> Result<Vec<AppEntry>, String> {
 }
 
 fn ensure_apps_json(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
-    // 1. Find the app config dir (OS-specific, managed by Tauri)
-    let config_dir = app.path().app_config_dir()?;
-    fs::create_dir_all(&config_dir)?;
+    // 1. Find (or create) the user config dir
+    let config_dir = app.path().app_config_dir()
+        .map_err(|e| anyhow::anyhow!("failed to get app_config_dir: {e}"))?;
+    fs::create_dir_all(&config_dir)
+        .map_err(|e| anyhow::anyhow!("failed to create config_dir {config_dir:?}: {e}"))?;
 
-    // Path to working JSON
+    // Target path inside config dir
     let json_path = config_dir.join("apps.json");
 
-    // 2. If missing, copy from bundled resources
+    // 2. If user config doesn’t exist yet, seed it
     if !json_path.exists() {
-        let resource_path = app
-            .path()
-            .resolve("resources/apps.json", tauri::path::BaseDirectory::Resource)?;
-        fs::copy(&resource_path, &json_path)?;
-        println!("Copied default apps.json to {:?}", json_path);
+        // Try bundled resource first
+        let resource_path: PathBuf = match app.path().resolve("apps.json", tauri::path::BaseDirectory::Resource) {
+            Ok(path) => path,
+            Err(_) => PathBuf::from("src-tauri/resources/apps.json"), // fallback for dev
+        };
+
+        if resource_path.exists() {
+            fs::copy(&resource_path, &json_path)
+                .map_err(|e| anyhow::anyhow!("failed to copy from {resource_path:?} to {json_path:?}: {e}"))?;
+            println!("Seeded apps.json from {:?}", resource_path);
+        } else {
+            // Last fallback: just create empty JSON
+            fs::write(&json_path, "[]")?;
+            println!("apps.json not found in resources, created empty file at {:?}", json_path);
+        }
     }
 
     Ok(json_path)
 }
+
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
