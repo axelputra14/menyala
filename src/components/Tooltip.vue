@@ -1,9 +1,11 @@
-<script setup lang="ts"></script>
+<script setup lang="ts">
+const props = defineProps<{ text: string }>();
+</script>
 
 <template>
   <div class="tooltip-container">
     <div class="text-box">
-      <p>AstralAir no Shiroki Towa</p>
+      <p>{{ props.text }}</p>
     </div>
   </div>
 </template>

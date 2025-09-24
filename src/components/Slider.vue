@@ -1,6 +1,14 @@
 <script setup>
 import { useKeenSlider } from "keen-slider/vue.es";
 import "keen-slider/keen-slider.min.css";
+import { useFetchStore } from "../stores/fetch";
+import Tooltip from "./Tooltip.vue";
+
+const fetchStore = useFetchStore();
+
+onMounted(() => {
+  fetchStore.getApps();
+});
 
 const wheelControls = (slider) => {
   let touchTimeout;
@@ -47,14 +55,14 @@ const [container] = useKeenSlider(
 </script>
 
 <template>
+  <Tooltip />
   <div class="slider-wrapper">
     <div ref="container" class="keen-slider">
-      <!-- generate 50 slides -->
       <div
-        v-for="i in 50"
-        :key="i"
+        v-for="app in fetchStore.appList"
+        :key="app.exe"
         class="keen-slider__slide slide-items"
-        :class="`number-slide${((i - 1) % 5) + 1}`"
+        :class="`number-slide-${app}`"
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"

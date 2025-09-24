@@ -1,26 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
-import { invoke } from "@tauri-apps/api/core";
 import Slider from "./components/Slider.vue";
-import Tooltip from "./components/Tooltip.vue";
-
-const appList = ref([]);
-const apps: any = ref([]);
-
-async function getApps() {
-  appList.value = await invoke("get_apps", { apps: apps.value });
-  console.log(apps.value);
-}
-
-onMounted(() => {
-  getApps();
-});
+// import Tooltip from "./components/Tooltip.vue";
 </script>
 
 <template>
   <main class="container">
-    <Tooltip />
-    <Slider :items="appList" />
+    <!-- <Tooltip /> -->
+    <Slider />
   </main>
 </template>
 
