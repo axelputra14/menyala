@@ -1,12 +1,19 @@
 <script setup lang="ts">
 import Slider from "./components/Slider.vue";
-// import Tooltip from "./components/Tooltip.vue";
+import Tooltip from "./components/Tooltip.vue";
+import { ref } from "vue";
+
+const hoveredApp = ref(null);
+
+function onHover(app: any) {
+  hoveredApp.value = app;
+}
 </script>
 
 <template>
   <main class="container">
-    <!-- <Tooltip /> -->
-    <Slider />
+    <Tooltip :app="hoveredApp" />
+    <Slider v-on:hover="onHover" />
   </main>
 </template>
 

@@ -2,8 +2,7 @@
 import { useKeenSlider } from "keen-slider/vue.es";
 import "keen-slider/keen-slider.min.css";
 import { useFetchStore } from "../stores/fetch";
-import Tooltip from "./Tooltip.vue";
-import { onMounted } from "vue";
+import { onMounted, defineEmits } from "vue";
 
 const fetchStore = useFetchStore();
 
@@ -53,10 +52,15 @@ const [container] = useKeenSlider(
   },
   [wheelControls]
 );
+
+const emit = defineEmits(["hover"]);
+
+function emitHover(app) {
+  emit("hover", app);
+}
 </script>
 
 <template>
-  <Tooltip />
   <div class="slider-wrapper">
     <div ref="container" class="keen-slider">
       <div
@@ -64,6 +68,8 @@ const [container] = useKeenSlider(
         :key="app.exe"
         class="keen-slider__slide slide-items"
         :class="`number-slide-${app}`"
+        @mouseenter="emitHover(app)"
+        @mouseleave="emitHover(null)"
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"

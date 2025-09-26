@@ -1,11 +1,18 @@
 <script setup lang="ts">
-const props = defineProps<{ text: string }>();
+import { defineProps } from "vue";
+
+const props = defineProps({
+  app: {
+    type: Object as () => { id: number; name: string; icon: string } | null,
+    default: null,
+  },
+});
 </script>
 
 <template>
-  <div class="tooltip-container">
+  <div class="tooltip-container" v-if="app">
     <div class="text-box">
-      <p>{{ props.text }}</p>
+      <p>{{ app.name }}</p>
     </div>
   </div>
 </template>
