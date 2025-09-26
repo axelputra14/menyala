@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use anyhow;
+use tauri_plugin_positioner::{WindowExt, Position};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AppEntry {
@@ -71,11 +72,22 @@ fn ensure_apps_json(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let mut builder = tauri::Builder::default();
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_positioner::init())
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.set_focus();
+            }
+        }))
         .setup(|app| {
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&quit_i])?;
+
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.move_window(Position::BottomCenter);
+            }
+
             let tray = TrayIconBuilder::new()
 
             .menu(&menu)
@@ -98,19 +110,8 @@ pub fn run() {
 
             println!("Using apps.json at: {}", json_path.display());
 
-
-
-            #[cfg(desktop)]
-                {
-                    builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
-                    let _ = app.get_webview_window("main")
-                       .expect("no main window")
-                       .set_focus();
-                }));
-            }
             Ok(())
         })
-        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![greet,get_apps])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
