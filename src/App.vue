@@ -1,19 +1,19 @@
 <script setup lang="ts">
 import Slider from "./components/Slider.vue";
-import Tooltip from "./components/Tooltip.vue";
-import { ref } from "vue";
+// import Tooltip from "./components/Tooltip.vue";
+// import { ref } from "vue";
 
-const hoveredApp = ref(null);
+// const hoveredApp = ref(null);
 
-function onHover(app: any) {
-  hoveredApp.value = app;
-}
+// function onHover(app: any) {
+//   hoveredApp.value = app;
+// }
 </script>
 
 <template>
   <main class="container">
-    <Tooltip :app="hoveredApp" />
-    <Slider v-on:hover="onHover" />
+    <!-- <Tooltip :app="hoveredApp" /> -->
+    <Slider />
   </main>
 </template>
 
@@ -35,7 +35,7 @@ function onHover(app: any) {
 }
 
 .container {
-  margin: 0;
+  margin-top: 3rem;
   padding-top: 10vh;
   display: flex;
   flex-direction: column;

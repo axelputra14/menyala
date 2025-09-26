@@ -1,10 +1,17 @@
 <script setup>
+import { ref } from "vue";
 import { useKeenSlider } from "keen-slider/vue.es";
 import "keen-slider/keen-slider.min.css";
 import { useFetchStore } from "../stores/fetch";
 import { onMounted, defineEmits } from "vue";
+import Tooltip from "./Tooltip.vue";
 
 const fetchStore = useFetchStore();
+
+const hoveredApp = ref(null);
+function onHover(app) {
+  hoveredApp.value = app;
+}
 
 onMounted(() => {
   fetchStore.getApps();
@@ -16,7 +23,6 @@ const wheelControls = (slider) => {
   let wheelActive = false;
 
   const dispatch = (e, name) => {
-    // Use vertical wheel movement to drag horizontally
     position.x -= e.deltaY;
     slider.container.dispatchEvent(
       new CustomEvent(name, { detail: { x: position.x, y: 0 } })
@@ -52,12 +58,6 @@ const [container] = useKeenSlider(
   },
   [wheelControls]
 );
-
-const emit = defineEmits(["hover"]);
-
-function emitHover(app) {
-  emit("hover", app);
-}
 </script>
 
 <template>
@@ -68,9 +68,10 @@ function emitHover(app) {
         :key="app.exe"
         class="keen-slider__slide slide-items"
         :class="`number-slide-${app}`"
-        @mouseenter="emitHover(app)"
-        @mouseleave="emitHover(null)"
+        @mouseenter="onHover(app)"
+        @mouseleave="onHover(null)"
       >
+        <Tooltip :app="app" />
         <svg
           xmlns="http://www.w3.org/2000/svg"
           width="48"
@@ -88,6 +89,15 @@ function emitHover(app) {
 </template>
 
 <style>
+/* .tooltip-container {
+
+} */
+
+.slide-items:hover .tooltip-container {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 body {
   margin: 0;
   font-family: "Inter", sans-serif;
@@ -96,18 +106,45 @@ body {
 }
 
 .slider-wrapper {
+  position: relative; /* needed for overlays */
   background: rgba(255, 255, 255, 0.1);
   box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
   backdrop-filter: blur(1px);
   -webkit-backdrop-filter: blur(4px);
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 1rem;
-  padding-left: 16px;
-  padding-right: 16px;
-  padding-top: 8px;
-  padding-bottom: 8px;
+  padding: 8px 16px;
   margin-bottom: 1rem;
-  overflow: hidden;
+}
+
+/* gradient overlays on left + right */
+.slider-wrapper::before,
+.slider-wrapper::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 48px;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.slider-wrapper::before {
+  left: 0;
+  background: linear-gradient(
+    to right,
+    rgba(203, 203, 203, 0.3),
+    rgba(255, 255, 255, 0.01)
+  );
+}
+
+.slider-wrapper::after {
+  right: 0;
+  background: linear-gradient(
+    to left,
+    rgba(203, 203, 203, 0.3),
+    rgba(255, 255, 255, 0.01)
+  );
 }
 
 [class^="number-slide"],
@@ -116,31 +153,13 @@ body {
   align-items: center;
   justify-content: center;
   font-size: 16px;
-  color: #fff;
+  color: #030303;
   font-weight: 500;
   max-height: 100vh;
 }
 
 .keen-slider {
-  -webkit-mask-image: linear-gradient(
-    to right,
-    transparent,
-    black 10%,
-    black 90%,
-    transparent
-  );
-  -webkit-mask-repeat: no-repeat;
-  -webkit-mask-size: 100% 100%;
-
-  mask-image: linear-gradient(
-    to right,
-    transparent,
-    black 11%,
-    black 89%,
-    transparent
-  );
-  mask-repeat: no-repeat;
-  mask-size: 100% 100%;
+  overflow: visible !important; /* no mask anymore */
 }
 
 .keen-slider__slide {
@@ -153,7 +172,8 @@ body {
 }
 
 .slide-items {
-  overflow: visible;
+  overflow: visible !important;
+  position: relative; /* tooltip positions relative to icon */
 }
 
 .slide-items svg,

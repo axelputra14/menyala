@@ -28,18 +28,22 @@ const props = defineProps({
   display: flex;
   align-items: center;
   justify-content: center;
+  position: absolute;
+  bottom: 100%; /* place above icon */
   margin-bottom: 6px;
-}
 
-.text-box {
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.6);
   box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.17);
-  /* backdrop-filter: blur(1px); */
-  /* -webkit-backdrop-filter: blur(4px); */
-  /* border: 1px solid rgba(255, 255, 255, 0.18); */
-  border-radius: 0.5rem;
-  padding-left: 1rem;
-  padding-right: 1rem;
-  color: #fafafe;
+  color: white;
+  font-size: 14px;
+  padding: 4px 1rem;
+  border-radius: 8px;
+
+  /* hidden by default */
+  opacity: 0;
+  transform: translateY(15px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  pointer-events: none;
+  z-index: 9999;
 }
 </style>
