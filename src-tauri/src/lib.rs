@@ -7,8 +7,24 @@ use tauri::{Manager};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use anyhow;
+use sha2::{Sha384, Digest};
+use std::path::Path;
+use std::os::windows::prelude::OsStrExt;
+
 use tauri_plugin_positioner::{WindowExt, Position};
+use tauri::AppHandle;
+use anyhow::{anyhow, Result};
+
+use windows::{
+    core::PCWSTR,
+    Win32::{
+        UI::{
+            Shell::ExtractIconExW,
+            WindowsAndMessaging::{DestroyIcon,HICON}
+        },
+    },
+};
+
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AppEntry {
@@ -18,11 +34,77 @@ pub struct AppEntry {
     pub icon: Option<String>, // null in JSON → None in Rust
 }
 
+fn extract_icons(path: &std::path::Path) -> anyhow::Result<()> {
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    let mut large_icon: HICON = HICON(std::ptr::null_mut());
+    let mut small_icon: HICON = HICON(std::ptr::null_mut());
+
+    let count = unsafe {
+        ExtractIconExW(
+            PCWSTR(wide.as_ptr()),
+            0,
+            Some(&mut large_icon),
+            Some(&mut small_icon),
+            1,
+        )
+    };
+
+    if count == 0 {
+        anyhow::bail!("No icons found");
+    }
+
+    // ... use large_icon or small_icon ...
+
+    unsafe {
+        if large_icon.0 != std::ptr::null_mut() {
+            DestroyIcon(large_icon);
+        }
+        if small_icon.0 != std::ptr::null_mut() {
+            DestroyIcon(small_icon);
+        }
+    }
+
+    Ok(())
+}
+
 /// Load the working `apps.json` into a Vec<AppEntry>.
 pub fn load_apps(json_path: &PathBuf) -> anyhow::Result<Vec<AppEntry>> {
     let data = fs::read_to_string(json_path)?;
     let apps: Vec<AppEntry> = serde_json::from_str(&data)?;
     Ok(apps)
+}
+
+pub fn hash_app_path(path: &Path) -> String {
+    // Normalize for consistency (lowercase + absolute path)
+    let normalized = path
+        .canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf()) // fallback if file doesn't exist
+        .to_string_lossy()
+        .to_lowercase();
+
+    // Compute SHA-384 digest
+    let mut hasher = Sha384::new();
+    hasher.update(normalized.as_bytes());
+    let digest = hasher.finalize();
+
+    // Convert to hex string
+    hex::encode(digest)
+}
+
+pub fn ensure_icocache_dir(app: &AppHandle) -> Result<PathBuf> {
+    // Base directory managed by Tauri (e.g., AppData\Roaming\<app>)
+    let base_dir = app.path().app_config_dir()?;
+    let cache_dir = base_dir.join("icocache");
+
+    // Create it if missing
+    fs::create_dir_all(&cache_dir)?;
+
+    Ok(cache_dir)
 }
 
 #[tauri::command]
@@ -107,8 +189,14 @@ pub fn run() {
             .build(app)?;
             // let handle = app.handle();
             let json_path = ensure_apps_json(&app.handle())?;
-
             println!("Using apps.json at: {}", json_path.display());
+            // handle cache dir
+            let cache_dir = ensure_icocache_dir(&app.handle())?;
+            println!("Icon cache directory: {}", cache_dir.display());
+            
+            // temporary code
+            let sample_path = std::path::Path::new("C:\\Windows\\notepad.exe");
+            println!("Hash: {}", hash_app_path(sample_path));
 
             Ok(())
         })
