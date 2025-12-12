@@ -10,6 +10,8 @@ use std::path::PathBuf;
 use sha2::{Sha384, Digest};
 use std::path::Path;
 use std::os::windows::prelude::OsStrExt;
+use std::ffi::c_void; // Import c_void
+use windows::Win32::Graphics::Gdi::{GetDC, ReleaseDC, DeleteObject}; // Import GetDC and DeleteObject
 
 use tauri_plugin_positioner::{WindowExt, Position};
 use tauri::AppHandle;
@@ -20,11 +22,20 @@ use windows::{
     Win32::{
         UI::{
             Shell::ExtractIconExW,
-            WindowsAndMessaging::{DestroyIcon,HICON}
+            WindowsAndMessaging::{DestroyIcon,HICON, GetIconInfo, ICONINFO}
         },
+        Graphics::Gdi::{
+            GetObjectW, GetDIBits,
+            BITMAP, BITMAPINFO, BITMAPINFOHEADER,
+            DIB_RGB_COLORS,
+            BI_RGB
+        },
+        Foundation::{HWND}
     },
+    core::Error as WinError,
 };
-
+use image::{RgbaImage, ImageEncoder};
+use image::codecs::png::PngEncoder;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AppEntry {
@@ -70,6 +81,238 @@ fn extract_icons(path: &std::path::Path) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn hicon_to_png_bytes(icon: HICON) -> anyhow::Result<Vec<u8>> {
+    unsafe {
+        //
+        // 1. Read ICONINFO
+        //
+        let mut info = ICONINFO::default();
+        if !GetIconInfo(icon, &mut info).is_ok() {
+            return Err(anyhow::anyhow!("GetIconInfo failed"));
+        }
+
+        //
+        // 2. Read BITMAP dimensions
+        //
+        let mut bmp = BITMAP::default();
+        if GetObjectW(
+            info.hbmColor.into(),
+            std::mem::size_of::<BITMAP>() as i32,
+            Some(&mut bmp as *mut _ as *mut _ as *mut std::ffi::c_void), // Use std::ffi::c_void
+        ) == 0
+        {
+            return Err(anyhow::anyhow!("GetObjectW failed"));
+        }
+
+        let width = bmp.bmWidth as u32;
+        let height = bmp.bmHeight as u32;
+
+        //
+        // 3. Prepare BITMAPINFO for GetDIBits
+        //
+        let mut bi = BITMAPINFO::default();
+        bi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+        bi.bmiHeader.biWidth = width as i32;
+        bi.bmiHeader.biHeight = -(height as i32); // top-down
+        bi.bmiHeader.biPlanes = 1;
+        bi.bmiHeader.biBitCount = 32;
+        bi.bmiHeader.biCompression = BI_RGB.0; // Cast to u32
+
+        //
+        // 4. Allocate BGRA buffer
+        //
+        let mut bgra_data = vec![0u8; (width * height * 4) as usize];
+        unsafe {
+            let hdc = GetDC(None);
+            if hdc.0.is_null() {
+                panic!("GetDC failed");
+            }
+
+            let result = GetDIBits(
+                hdc,
+                info.hbmColor,
+                0,
+                height as u32,
+                Some(bgra_data.as_mut_ptr() as *mut _),
+                &mut bi,
+                DIB_RGB_COLORS,
+            );
+
+            ReleaseDC(None, hdc);
+
+            if result == 0 {
+                panic!("GetDIBits failed");
+            }
+        }
+        //
+        // 5. Extract image pixels
+        //
+        let hdc = GetDC(None);
+        let result = GetDIBits(
+            hdc,
+            info.hbmColor,
+            0,
+            height,
+            Some(bgra_data.as_mut_ptr() as *mut _),
+            &mut bi,
+            DIB_RGB_COLORS,
+        );
+        ReleaseDC(None, hdc);
+        if result == 0 {
+            return Err(anyhow::anyhow!("GetDIBits failed"));
+        }
+
+        //
+        // 6. BGRA → RGBA
+        //
+        for px in bgra_data.chunks_exact_mut(4) {
+            px.swap(0, 2); // B ↔ R
+        }
+
+        //
+        // 7. Encode PNG using PngEncoder (image 0.25+)
+        //
+        let img = RgbaImage::from_raw(width, height, bgra_data)
+            .ok_or_else(|| anyhow::anyhow!("Failed to build RGBA image"))?;
+
+        let mut png_bytes = Vec::new();
+        {
+            let encoder = PngEncoder::new(&mut png_bytes);
+            encoder.write_image(
+                img.as_raw(),
+                img.width(),
+                img.height(),
+                image::ColorType::Rgba8.into(), // Convert to ExtendedColorType
+            )?;
+        }
+
+        //
+        // 8. Cleanup icon bitmaps
+        //
+        DeleteObject(info.hbmColor.into());
+        DeleteObject(info.hbmMask.into());
+
+        Ok(png_bytes)
+    }
+}
+
+fn extract_largest_hicon(path: &std::path::Path) -> anyhow::Result<HICON> {
+    //
+    // Convert path → UTF-16
+    //
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    //
+    // First call ExtractIconExW with count = 0 to get total icons
+    //
+    let total = unsafe {
+        ExtractIconExW(
+            PCWSTR(wide.as_ptr()),
+            0,
+            None,
+            None,
+            0, // count = 0 means "just tell me how many icons exist"
+        )
+    };
+
+    if total == 0 {
+        anyhow::bail!("No icons found in exe");
+    }
+
+    //
+    // Allocate buffers for all icons
+    //
+    let mut large_icons = vec![HICON::default(); total as usize];
+    let mut small_icons = vec![HICON::default(); total as usize];
+
+    //
+    // Actually load the icons
+    //
+    unsafe {
+        ExtractIconExW(
+            PCWSTR(wide.as_ptr()),
+            0,
+            Some(large_icons.as_mut_ptr()),
+            Some(small_icons.as_mut_ptr()),
+            total,
+        );
+    }
+
+    //
+    // Determine the largest icon
+    //
+    let mut best: Option<(HICON, i32)> = None;
+
+    let check_icon = |icon: HICON| -> Option<(HICON, i32)> {
+        if icon.0.is_null() {
+            return None;
+        }
+
+        // Get icon bitmap info
+        let mut info = windows::Win32::UI::WindowsAndMessaging::ICONINFO::default();
+        unsafe {
+            if !GetIconInfo(icon, &mut info).is_ok() {
+                return None;
+            }
+        }
+
+        let mut bmp = BITMAP::default();
+        let ok = unsafe {
+            GetObjectW(
+                info.hbmColor.into(),
+                std::mem::size_of::<BITMAP>() as i32,
+                Some(&mut bmp as *mut _ as *mut _ as *mut std::ffi::c_void),
+            )
+        };
+
+        unsafe {
+            windows::Win32::Graphics::Gdi::DeleteObject(info.hbmColor.into());
+            windows::Win32::Graphics::Gdi::DeleteObject(info.hbmMask.into());
+        }
+
+        if ok == 0 {
+            return None;
+        }
+
+        let size = bmp.bmWidth * bmp.bmHeight;
+        Some((icon, size))
+    };
+
+    // Try large icons first, then fallback to small
+    for icon in large_icons.iter().copied().chain(small_icons.iter().copied()) {
+        if let Some((handle, score)) = check_icon(icon) {
+            match best {
+                None => best = Some((handle, score)),
+                Some((_, best_score)) => {
+                    if score > best_score {
+                        best = Some((handle, score));
+                    }
+                }
+            }
+        }
+    }
+
+    let Some((best_icon, _)) = best else {
+        anyhow::bail!("Failed to find usable icon");
+    };
+
+    //
+    // Cleanup unused icons (except best one)
+    //
+    for icon_pair in large_icons.into_iter().chain(small_icons.into_iter()) {
+        if icon_pair.0.is_null() || icon_pair == best_icon {
+            continue;
+        }
+        unsafe { windows::Win32::UI::WindowsAndMessaging::DestroyIcon(icon_pair) };
+    }
+
+    Ok(best_icon)
 }
 
 /// Load the working `apps.json` into a Vec<AppEntry>.
