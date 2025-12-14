@@ -13,8 +13,9 @@ function onHover(app) {
   hoveredApp.value = app;
 }
 
-onMounted(() => {
-  fetchStore.getApps();
+onMounted(async () => {
+  await fetchStore.getApps();
+  await fetchStore.refreshApps();
 });
 
 const wheelControls = (slider) => {

@@ -343,75 +343,51 @@ fn refresh_apps(app: tauri::AppHandle) -> Result<Vec<AppEntry>, String> {
     let json_path = ensure_apps_json(&app).map_err(|e| e.to_string())?;
     let mut apps = load_apps(&json_path).map_err(|e| e.to_string())?;
 
-    // App config dir (same place apps.json lives)
+    // App config dir
     let app_dir = app
         .path()
         .app_config_dir()
         .map_err(|e| e.to_string())?;
 
-    // Icon cache directory: appdir/icocache/
+    // icocache dir
     let icocache_dir = app_dir.join("icocache");
     std::fs::create_dir_all(&icocache_dir).map_err(|e| e.to_string())?;
 
     let mut changed = false;
 
     for entry in apps.iter_mut() {
-        // Skip if icon already exists
+        // Skip if icon already recorded
         if entry.icon.is_some() {
             continue;
         }
 
         let exe_path = std::path::Path::new(&entry.exe);
         if !exe_path.exists() {
-            // exe missing → skip, leave icon = None
             continue;
         }
 
-        // 1. Normalize path
-        let normalized = exe_path
-            .canonicalize()
-            .map_err(|e| e.to_string())?;
-
-        // 2. Hash path (SHA-384)
-        let hash = hash_app_path(&normalized);
-
-        let file_name = format!("{hash}.png");
-        let relative_icon_path = format!("icocache/{file_name}");
-        let full_icon_path = icocache_dir.join(&file_name);
-
-        // 3. If icon already cached on disk, just reference it
-        if full_icon_path.exists() {
-            entry.icon = Some(relative_icon_path);
-            changed = true;
-            continue;
-        }
-
-        // 4. Extract largest icon
-        let hicon = match extract_largest_hicon(&normalized) {
-            Ok(h) => h,
-            Err(_) => continue,
-        };
-
-        // 5. Convert icon → PNG bytes
-        let png_bytes = match hicon_to_png_bytes(hicon) {
-            Ok(bytes) => bytes,
-            Err(_) => continue,
-        };
-
-        // 6. Save PNG
-        if std::fs::write(&full_icon_path, png_bytes).is_ok() {
-            entry.icon = Some(relative_icon_path);
-            changed = true;
+        match extract_icon_cached(exe_path, &icocache_dir) {
+            Ok(relative_icon_path) => {
+                entry.icon = Some(relative_icon_path.to_string_lossy().to_string());
+                changed = true;
+            }
+            Err(err) => {
+                eprintln!(
+                    "Failed to extract icon for {}: {}",
+                    entry.exe, err
+                );
+            }
         }
     }
 
-    // 7. Persist updated apps.json (only if needed)
+    // Persist only if modified
     if changed {
         save_apps(&json_path, &apps).map_err(|e| e.to_string())?;
     }
 
     Ok(apps)
 }
+
 
 
 pub fn hash_app_path(path: &Path) -> String {
@@ -495,8 +471,7 @@ pub fn ensure_icocache_dir(app: &AppHandle) -> Result<PathBuf> {
 #[tauri::command]
 fn get_apps(app: tauri::AppHandle) -> Result<Vec<AppEntry>, String> {
     let json_path = ensure_apps_json(&app).map_err(|e| e.to_string())?;
-    let apps = load_apps(&json_path).map_err(|e| e.to_string())?;
-    Ok(apps)
+    load_apps(&json_path).map_err(|e| e.to_string())
 }
 
 fn ensure_apps_json(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
@@ -618,16 +593,7 @@ pub fn run() {
             let cache_dir = ensure_icocache_dir(&app.handle())?;
             println!("Icon cache directory: {}", cache_dir.display());
             
-            // temporary code
-            let sample_path = std::path::Path::new("C:\\Windows\\notepad.exe");
-            println!("Hash: {}", hash_app_path(sample_path));
-            let exe = Path::new(r"C:\Windows\System32\notepad.exe");
 
-            let cache = std::path::Path::new("./icon_cache");
-
-            let icon = extract_icon_cached(exe, cache)?;
-            println!("Icon cached at {:?}", icon);
-            // end of temporary
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![get_apps,refresh_apps])
