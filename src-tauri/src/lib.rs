@@ -6,16 +6,18 @@ use tauri::{
 use tauri::{Manager};
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::fs::File;
 use std::path::PathBuf;
 use sha2::{Sha384, Digest};
 use std::path::Path;
 use std::os::windows::prelude::OsStrExt;
 use std::ffi::c_void; // Import c_void
 use windows::Win32::Graphics::Gdi::{GetDC, ReleaseDC, DeleteObject}; // Import GetDC and DeleteObject
+use std::io::{Read, BufReader};
 
 use tauri_plugin_positioner::{WindowExt, Position};
 use tauri::AppHandle;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Result, Context};
 
 use windows::{
     core::PCWSTR,
@@ -37,50 +39,12 @@ use windows::{
 use image::{RgbaImage, ImageEncoder};
 use image::codecs::png::PngEncoder;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppEntry {
     pub name: String,
     pub exe: String,
     pub publisher: String,
     pub icon: Option<String>, // null in JSON → None in Rust
-}
-
-fn extract_icons(path: &std::path::Path) -> anyhow::Result<()> {
-    let wide: Vec<u16> = path
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect();
-
-    let mut large_icon: HICON = HICON(std::ptr::null_mut());
-    let mut small_icon: HICON = HICON(std::ptr::null_mut());
-
-    let count = unsafe {
-        ExtractIconExW(
-            PCWSTR(wide.as_ptr()),
-            0,
-            Some(&mut large_icon),
-            Some(&mut small_icon),
-            1,
-        )
-    };
-
-    if count == 0 {
-        anyhow::bail!("No icons found");
-    }
-
-    // ... use large_icon or small_icon ...
-
-    unsafe {
-        if large_icon.0 != std::ptr::null_mut() {
-            DestroyIcon(large_icon);
-        }
-        if small_icon.0 != std::ptr::null_mut() {
-            DestroyIcon(small_icon);
-        }
-    }
-
-    Ok(())
 }
 
 fn hicon_to_png_bytes(icon: HICON) -> anyhow::Result<Vec<u8>> {
@@ -315,12 +279,140 @@ fn extract_largest_hicon(path: &std::path::Path) -> anyhow::Result<HICON> {
     Ok(best_icon)
 }
 
+fn extract_largest_icon_png(path: &std::path::Path) -> anyhow::Result<Vec<u8>> {
+    // 1. Extract best icon handle
+    let hicon = extract_largest_hicon(path)?;
+
+    // 2. Convert HICON → PNG bytes
+    let png_bytes = hicon_to_png_bytes(hicon)?;
+
+    // 3. Destroy the icon handle (VERY IMPORTANT)
+    unsafe {
+        windows::Win32::UI::WindowsAndMessaging::DestroyIcon(hicon);
+    }
+
+    Ok(png_bytes)
+}
+
+fn hash_file_sha384(path: &std::path::Path) -> anyhow::Result<String> {
+    let file = File::open(path)?;
+    let mut reader = BufReader::new(file);
+
+    let mut hasher = Sha384::new();
+    let mut buffer = [0u8; 8192];
+
+    loop {
+        let n = reader.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buffer[..n]);
+    }
+
+    let digest = hasher.finalize();
+    Ok(hex::encode(digest))
+}
+
+pub fn save_apps(json_path: &Path, apps: &[AppEntry]) -> anyhow::Result<()> {
+    // Serialize with pretty formatting (nice for debugging)
+    let json = serde_json::to_string_pretty(apps)
+        .context("Failed to serialize apps.json")?;
+
+    // Write to a temp file first
+    let tmp_path = json_path.with_extension("json.tmp");
+
+    fs::write(&tmp_path, json)
+        .context("Failed to write temporary apps.json")?;
+
+    // Atomically replace original file
+    fs::rename(&tmp_path, json_path)
+        .context("Failed to replace apps.json")?;
+
+    Ok(())
+}
+
 /// Load the working `apps.json` into a Vec<AppEntry>.
 pub fn load_apps(json_path: &PathBuf) -> anyhow::Result<Vec<AppEntry>> {
     let data = fs::read_to_string(json_path)?;
     let apps: Vec<AppEntry> = serde_json::from_str(&data)?;
     Ok(apps)
 }
+
+#[tauri::command]
+fn refresh_apps(app: tauri::AppHandle) -> Result<Vec<AppEntry>, String> {
+    let json_path = ensure_apps_json(&app).map_err(|e| e.to_string())?;
+    let mut apps = load_apps(&json_path).map_err(|e| e.to_string())?;
+
+    // App config dir (same place apps.json lives)
+    let app_dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| e.to_string())?;
+
+    // Icon cache directory: appdir/icocache/
+    let icocache_dir = app_dir.join("icocache");
+    std::fs::create_dir_all(&icocache_dir).map_err(|e| e.to_string())?;
+
+    let mut changed = false;
+
+    for entry in apps.iter_mut() {
+        // Skip if icon already exists
+        if entry.icon.is_some() {
+            continue;
+        }
+
+        let exe_path = std::path::Path::new(&entry.exe);
+        if !exe_path.exists() {
+            // exe missing → skip, leave icon = None
+            continue;
+        }
+
+        // 1. Normalize path
+        let normalized = exe_path
+            .canonicalize()
+            .map_err(|e| e.to_string())?;
+
+        // 2. Hash path (SHA-384)
+        let hash = hash_app_path(&normalized);
+
+        let file_name = format!("{hash}.png");
+        let relative_icon_path = format!("icocache/{file_name}");
+        let full_icon_path = icocache_dir.join(&file_name);
+
+        // 3. If icon already cached on disk, just reference it
+        if full_icon_path.exists() {
+            entry.icon = Some(relative_icon_path);
+            changed = true;
+            continue;
+        }
+
+        // 4. Extract largest icon
+        let hicon = match extract_largest_hicon(&normalized) {
+            Ok(h) => h,
+            Err(_) => continue,
+        };
+
+        // 5. Convert icon → PNG bytes
+        let png_bytes = match hicon_to_png_bytes(hicon) {
+            Ok(bytes) => bytes,
+            Err(_) => continue,
+        };
+
+        // 6. Save PNG
+        if std::fs::write(&full_icon_path, png_bytes).is_ok() {
+            entry.icon = Some(relative_icon_path);
+            changed = true;
+        }
+    }
+
+    // 7. Persist updated apps.json (only if needed)
+    if changed {
+        save_apps(&json_path, &apps).map_err(|e| e.to_string())?;
+    }
+
+    Ok(apps)
+}
+
 
 pub fn hash_app_path(path: &Path) -> String {
     // Normalize for consistency (lowercase + absolute path)
@@ -339,6 +431,56 @@ pub fn hash_app_path(path: &Path) -> String {
     hex::encode(digest)
 }
 
+fn get_cached_icon_png(
+    exe_path: &Path,
+    cache_root: &Path,
+) -> anyhow::Result<PathBuf> {
+    //
+    // 1. Ensure cache/icons directory exists
+    //
+    let icon_dir = cache_root.join("icons");
+    fs::create_dir_all(&icon_dir)?;
+
+    //
+    // 2. Hash exe → cache key
+    //
+    let hash = hash_file_sha384(exe_path)?;
+    let icon_path = icon_dir.join(format!("{hash}.png"));
+
+    //
+    // 3. Cache hit → return immediately
+    //
+    if icon_path.exists() {
+        return Ok(icon_path);
+    }
+
+    //
+    // 4. Cache miss → extract largest icon
+    //
+    let hicon = extract_largest_hicon(exe_path)?;
+
+    //
+    // 5. Convert HICON → PNG bytes
+    //
+    let png_bytes = hicon_to_png_bytes(hicon)?;
+
+    //
+    // 6. Destroy the chosen icon handle
+    //
+    unsafe {
+        windows::Win32::UI::WindowsAndMessaging::DestroyIcon(hicon);
+    }
+
+    //
+    // 7. Write PNG atomically
+    //
+    let tmp_path = icon_path.with_extension("tmp");
+    fs::write(&tmp_path, png_bytes)?;
+    fs::rename(&tmp_path, &icon_path)?;
+
+    Ok(icon_path)
+}
+
 pub fn ensure_icocache_dir(app: &AppHandle) -> Result<PathBuf> {
     // Base directory managed by Tauri (e.g., AppData\Roaming\<app>)
     let base_dir = app.path().app_config_dir()?;
@@ -348,11 +490,6 @@ pub fn ensure_icocache_dir(app: &AppHandle) -> Result<PathBuf> {
     fs::create_dir_all(&cache_dir)?;
 
     Ok(cache_dir)
-}
-
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
 #[tauri::command]
@@ -392,6 +529,50 @@ fn ensure_apps_json(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
     }
 
     Ok(json_path)
+}
+
+
+fn sha384_file(path: &Path) -> anyhow::Result<String> {
+    let mut file = File::open(path)?;
+    let mut hasher = Sha384::new();
+    let mut buf = [0u8; 8192];
+
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+pub fn extract_icon_cached(
+    exe_path: &Path,
+    cache_dir: &Path,
+) -> anyhow::Result<PathBuf> {
+    // 1. Hash the binary
+    let hash = sha384_file(exe_path)?;
+    let file_name = format!("{hash}.png");
+
+    let out_path = cache_dir.join(file_name);
+
+    // 2. Cache hit → return immediately
+    if out_path.exists() {
+        return Ok(out_path);
+    }
+
+    // 3. Ensure cache directory exists
+    fs::create_dir_all(cache_dir)?;
+
+    // 4. Extract largest icon → PNG bytes
+    let png_bytes = extract_largest_icon_png(exe_path)?;
+
+    // 5. Write to disk
+    fs::write(&out_path, png_bytes)?;
+
+    Ok(out_path)
 }
 
 
@@ -440,10 +621,16 @@ pub fn run() {
             // temporary code
             let sample_path = std::path::Path::new("C:\\Windows\\notepad.exe");
             println!("Hash: {}", hash_app_path(sample_path));
+            let exe = Path::new(r"C:\Windows\System32\notepad.exe");
 
+            let cache = std::path::Path::new("./icon_cache");
+
+            let icon = extract_icon_cached(exe, cache)?;
+            println!("Icon cached at {:?}", icon);
+            // end of temporary
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![greet,get_apps])
+        .invoke_handler(tauri::generate_handler![get_apps,refresh_apps])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
