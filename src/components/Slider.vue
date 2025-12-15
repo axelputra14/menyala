@@ -6,12 +6,17 @@ import { useFetchStore } from "../stores/fetch";
 import { onMounted, defineEmits } from "vue";
 import Tooltip from "./Tooltip.vue";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 
 const fetchStore = useFetchStore();
 
 const hoveredApp = ref(null);
 function onHover(app) {
   hoveredApp.value = app;
+}
+
+function launchApp(exe) {
+  invoke("launch_app", { exe });
 }
 
 onMounted(async () => {
@@ -72,6 +77,7 @@ const [container] = useKeenSlider(
         :class="`number-slide-${app}`"
         @mouseenter="onHover(app)"
         @mouseleave="onHover(null)"
+        @click="launchApp(app.exe)"
       >
         <Tooltip :app="app" />
         <img
@@ -186,5 +192,29 @@ body {
 .slide-items svg.loading,
 .slide-items img.loading {
   animation: 1s loading ease-in infinite;
+}
+
+.slider-wrapper {
+  animation: 2s ease-out 0s 1 wait, 2s ease-out 2s 1 slideInFromBottom;
+}
+
+@keyframes wait {
+  from {
+    transform: translateY(150px);
+  }
+  to {
+    transform: translateY(150px);
+  }
+}
+
+@keyframes slideInFromBottom {
+  from {
+    transform: translateY(150px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 </style>

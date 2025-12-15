@@ -5,13 +5,13 @@ use tauri::{
 };
 use tauri::{Manager};
 use serde::{Deserialize, Serialize};
-use std::fs;
+use std::{fs, process::Command};
 use std::fs::File;
 use std::path::PathBuf;
 use sha2::{Sha384, Digest};
 use std::path::Path;
 use std::os::windows::prelude::OsStrExt;
-use std::ffi::c_void; // Import c_void
+//use std::ffi::c_void; // Import c_void
 use windows::Win32::Graphics::Gdi::{GetDC, ReleaseDC, DeleteObject}; // Import GetDC and DeleteObject
 use std::io::{Read, BufReader};
 
@@ -294,25 +294,6 @@ fn extract_largest_icon_png(path: &std::path::Path) -> anyhow::Result<Vec<u8>> {
     Ok(png_bytes)
 }
 
-fn hash_file_sha384(path: &std::path::Path) -> anyhow::Result<String> {
-    let file = File::open(path)?;
-    let mut reader = BufReader::new(file);
-
-    let mut hasher = Sha384::new();
-    let mut buffer = [0u8; 8192];
-
-    loop {
-        let n = reader.read(&mut buffer)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buffer[..n]);
-    }
-
-    let digest = hasher.finalize();
-    Ok(hex::encode(digest))
-}
-
 pub fn save_apps(json_path: &Path, apps: &[AppEntry]) -> anyhow::Result<()> {
     // Serialize with pretty formatting (nice for debugging)
     let json = serde_json::to_string_pretty(apps)
@@ -338,8 +319,7 @@ pub fn load_apps(json_path: &PathBuf) -> anyhow::Result<Vec<AppEntry>> {
     Ok(apps)
 }
 
-#[tauri::command]
-fn refresh_apps(app: tauri::AppHandle) -> Result<Vec<AppEntry>, String> {
+fn refresh_apps_impl(app: &tauri::AppHandle) -> Result<Vec<AppEntry>, String>{
     let json_path = ensure_apps_json(&app).map_err(|e| e.to_string())?;
     let mut apps = load_apps(&json_path).map_err(|e| e.to_string())?;
 
@@ -388,7 +368,10 @@ fn refresh_apps(app: tauri::AppHandle) -> Result<Vec<AppEntry>, String> {
     Ok(apps)
 }
 
-
+#[tauri::command]
+fn refresh_apps(app: tauri::AppHandle) -> Result<Vec<AppEntry>, String> {
+    refresh_apps_impl(&app).map_err(|e| e.to_string())
+}
 
 pub fn hash_app_path(path: &Path) -> String {
     // Normalize for consistency (lowercase + absolute path)
@@ -405,56 +388,6 @@ pub fn hash_app_path(path: &Path) -> String {
 
     // Convert to hex string
     hex::encode(digest)
-}
-
-fn get_cached_icon_png(
-    exe_path: &Path,
-    cache_root: &Path,
-) -> anyhow::Result<PathBuf> {
-    //
-    // 1. Ensure cache/icons directory exists
-    //
-    let icon_dir = cache_root.join("icons");
-    fs::create_dir_all(&icon_dir)?;
-
-    //
-    // 2. Hash exe → cache key
-    //
-    let hash = hash_file_sha384(exe_path)?;
-    let icon_path = icon_dir.join(format!("{hash}.png"));
-
-    //
-    // 3. Cache hit → return immediately
-    //
-    if icon_path.exists() {
-        return Ok(icon_path);
-    }
-
-    //
-    // 4. Cache miss → extract largest icon
-    //
-    let hicon = extract_largest_hicon(exe_path)?;
-
-    //
-    // 5. Convert HICON → PNG bytes
-    //
-    let png_bytes = hicon_to_png_bytes(hicon)?;
-
-    //
-    // 6. Destroy the chosen icon handle
-    //
-    unsafe {
-        windows::Win32::UI::WindowsAndMessaging::DestroyIcon(hicon);
-    }
-
-    //
-    // 7. Write PNG atomically
-    //
-    let tmp_path = icon_path.with_extension("tmp");
-    fs::write(&tmp_path, png_bytes)?;
-    fs::rename(&tmp_path, &icon_path)?;
-
-    Ok(icon_path)
 }
 
 pub fn ensure_icocache_dir(app: &AppHandle) -> Result<PathBuf> {
@@ -550,6 +483,20 @@ pub fn extract_icon_cached(
     Ok(out_path)
 }
 
+#[tauri::command]
+fn launch_app(exe: &str) -> Result<(), String> {
+    use std::{path::Path, process::Command};
+
+    let exe_path = Path::new(exe);
+
+    Command::new(exe_path)
+        .current_dir(
+            exe_path.parent().unwrap_or_else(|| Path::new("."))
+        )
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -562,8 +509,9 @@ pub fn run() {
             }
         }))
         .setup(|app| {
+            let refresh_i = MenuItem::with_id(app, "refresh", "Refresh Apps", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&quit_i])?;
+            let menu = Menu::with_items(app, &[&refresh_i, &quit_i])?;
 
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.move_window(Position::BottomCenter);
@@ -574,13 +522,17 @@ pub fn run() {
             .menu(&menu)
             .show_menu_on_left_click(false)
             .on_menu_event(|app, event| match event.id.as_ref() {
+                "refresh" => {
+                    println!("refresh menu item was clicked");
+                    refresh_apps_impl(&app).unwrap();
+                }
                 "quit" => {
                     println!("quit menu item was clicked");
                         app.exit(0);
                     }
-                    _ => {
-                        println!("menu item {:?} not handled", event.id);
-                    }
+                _ => {
+                    println!("menu item {:?} not handled", event.id);
+                }
             })
 
 
@@ -596,7 +548,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_apps,refresh_apps])
+        .invoke_handler(tauri::generate_handler![get_apps, refresh_apps, launch_app])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
