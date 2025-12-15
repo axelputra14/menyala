@@ -11,7 +11,7 @@ import Slider from "./components/Slider.vue";
 </script>
 
 <template>
-  <main class="container">
+  <main class="container hide-scrollbar">
     <!-- <Tooltip :app="hoveredApp" /> -->
     <Slider />
   </main>
@@ -25,7 +25,7 @@ import Slider from "./components/Slider.vue";
 
   color: #0f0f0f;
 
-  background-image: url("./assets/aa.jpg");
+  background-color: transparent;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;

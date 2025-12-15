@@ -27,7 +27,7 @@ onMounted(async () => {
 const wheelControls = (slider) => {
   let touchTimeout;
   let position = { x: 0 };
-  let wheelActive = false;
+  let wheelActive = true;
 
   const dispatch = (e, name) => {
     position.x -= e.deltaY;
@@ -167,7 +167,7 @@ body {
 
 .keen-slider__slide {
   height: 64px;
-  min-width: 48px;
+  min-width: 64px;
 }
 
 .keen-slider__slide:hover {

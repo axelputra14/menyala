@@ -15,7 +15,11 @@
         "title": "menyala",
         "width": 1200,
         "height": 200,
-        "decorations": true
+        "decorations": false,
+        "resizable": false,
+        "fullscreen": false,
+        "transparent": true,
+        "shadow": false
       }
     ],
     "security": {

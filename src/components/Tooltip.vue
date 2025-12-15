@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { defineProps } from "vue";
-
 const props = defineProps({
   app: {
     type: Object as () => { id: number; name: string; icon: string } | null,
@@ -31,6 +29,7 @@ const props = defineProps({
   position: absolute;
   bottom: 100%; /* place above icon */
   margin-bottom: 6px;
+  min-width: 780px;
 
   background: rgba(0, 0, 0, 0.6);
   box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.17);
