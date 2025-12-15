@@ -12,7 +12,7 @@ use sha2::{Sha384, Digest};
 use std::path::Path;
 use std::os::windows::prelude::OsStrExt;
 //use std::ffi::c_void; // Import c_void
-use windows::Win32::Graphics::Gdi::{GetDC, ReleaseDC, DeleteObject}; // Import GetDC and DeleteObject
+use windows::Win32::{Graphics::Gdi::{DeleteObject, GetDC, ReleaseDC}, UI::WindowsAndMessaging::IMAGE_BITMAP}; // Import GetDC and DeleteObject
 use std::io::{Read, BufReader};
 
 use tauri_plugin_positioner::{WindowExt, Position};
@@ -20,11 +20,12 @@ use tauri::AppHandle;
 use anyhow::{anyhow, Result, Context};
 
 use windows::{
-    core::PCWSTR,
+    core::{Interface, PCWSTR},
     Win32::{
         UI::{
-            Shell::ExtractIconExW,
-            WindowsAndMessaging::{DestroyIcon,HICON, GetIconInfo, ICONINFO}
+            Shell::{ExtractIconExW, SHFILEINFOW, SHGFI_SYSICONINDEX, SHGFI_USEFILEATTRIBUTES,
+                SHGetImageList, SHIL_JUMBO, SHGetFileInfoW},
+            WindowsAndMessaging::{DestroyIcon, HICON, GetIconInfo, ICONINFO}
         },
         Graphics::Gdi::{
             GetObjectW, GetDIBits,
@@ -32,10 +33,12 @@ use windows::{
             DIB_RGB_COLORS,
             BI_RGB
         },
-        Foundation::{HWND}
+        Foundation::{HWND},
+        System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED},
     },
     core::Error as WinError,
 };
+
 use image::{RgbaImage, ImageEncoder};
 use image::codecs::png::PngEncoder;
 
@@ -88,28 +91,28 @@ fn hicon_to_png_bytes(icon: HICON) -> anyhow::Result<Vec<u8>> {
         // 4. Allocate BGRA buffer
         //
         let mut bgra_data = vec![0u8; (width * height * 4) as usize];
-        unsafe {
-            let hdc = GetDC(None);
-            if hdc.0.is_null() {
-                panic!("GetDC failed");
-            }
 
-            let result = GetDIBits(
-                hdc,
-                info.hbmColor,
-                0,
-                height as u32,
-                Some(bgra_data.as_mut_ptr() as *mut _),
-                &mut bi,
-                DIB_RGB_COLORS,
-            );
-
-            ReleaseDC(None, hdc);
-
-            if result == 0 {
-                panic!("GetDIBits failed");
-            }
+        let hdc = GetDC(None);
+        if hdc.0.is_null() {
+            panic!("GetDC failed");
         }
+
+        let result = GetDIBits(
+            hdc,
+            info.hbmColor,
+            0,
+            height as u32,
+            Some(bgra_data.as_mut_ptr() as *mut _),
+            &mut bi,
+            DIB_RGB_COLORS,
+        );
+
+        ReleaseDC(None, hdc);
+
+        if result == 0 {
+            panic!("GetDIBits failed");
+        }
+        
         //
         // 5. Extract image pixels
         //
@@ -161,6 +164,51 @@ fn hicon_to_png_bytes(icon: HICON) -> anyhow::Result<Vec<u8>> {
         Ok(png_bytes)
     }
 }
+
+fn extract_shell_hicon(path: &std::path::Path) -> anyhow::Result<HICON> {
+    unsafe {
+        // Ensure COM is initialized (idempotent)
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+
+        // Convert path to UTF-16
+        let wide: Vec<u16> = path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
+        // 1. Ask Shell for system icon index
+        let mut info = SHFILEINFOW::default();
+
+        let ok = SHGetFileInfoW(
+            PCWSTR(wide.as_ptr()),
+            windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES(0),
+            Some(&mut info as *mut SHFILEINFOW),
+            std::mem::size_of::<SHFILEINFOW>() as u32,
+            SHGFI_SYSICONINDEX | SHGFI_USEFILEATTRIBUTES,
+        );
+
+        if ok == 0 {
+            anyhow::bail!("SHGetFileInfoW failed");
+        }
+
+        // 2. Get the Jumbo image list (256x256)
+        let image_list = SHGetImageList::<windows::Win32::UI::Controls::IImageList>(SHIL_JUMBO as i32)
+            .map_err(|_| anyhow::anyhow!("SHGetImageList failed"))?;
+
+        // 3. Extract HICON from image list
+        let hicon = image_list
+            .GetIcon(info.iIcon, 0)
+            .map_err(|_| anyhow::anyhow!("IImageList::GetIcon failed"))?;
+
+        if hicon.0.is_null() {
+            anyhow::bail!("Shell returned null HICON");
+        }
+
+        Ok(hicon)
+    }
+}
+
 
 fn extract_largest_hicon(path: &std::path::Path) -> anyhow::Result<HICON> {
     //
@@ -281,7 +329,8 @@ fn extract_largest_hicon(path: &std::path::Path) -> anyhow::Result<HICON> {
 
 fn extract_largest_icon_png(path: &std::path::Path) -> anyhow::Result<Vec<u8>> {
     // 1. Extract best icon handle
-    let hicon = extract_largest_hicon(path)?;
+    let hicon = extract_shell_hicon(path)
+        .or_else(|_| extract_largest_hicon(path))?;
 
     // 2. Convert HICON → PNG bytes
     let png_bytes = hicon_to_png_bytes(hicon)?;
