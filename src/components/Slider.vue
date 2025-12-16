@@ -3,7 +3,7 @@ import { ref } from "vue";
 import { useKeenSlider } from "keen-slider/vue.es";
 import "keen-slider/keen-slider.min.css";
 import { useFetchStore } from "../stores/fetch";
-import { onMounted, defineEmits } from "vue";
+import { onMounted } from "vue";
 
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { invoke } from "@tauri-apps/api/core";
@@ -12,12 +12,40 @@ const fetchStore = useFetchStore();
 
 const emit = defineEmits(["hover", "leave"]);
 
-const hoveredApp = ref(null);
-function onHover(app) {
+// const hoveredApp = ref(null);
+const hoveredIndex = ref(null);
+
+function iconStyle(index) {
+  if (hoveredIndex.value === null) return {};
+
+  const distance = Math.abs(index - hoveredIndex.value);
+
+  let scale = 1;
+  let translateY = 0;
+
+  if (distance === 0) {
+    scale = 1.5;
+    translateY = -14;
+  } else if (distance === 1) {
+    scale = 1.25;
+    translateY = -8;
+  } else if (distance === 2) {
+    scale = 1.1;
+    translateY = -4;
+  }
+
+  return {
+    transform: `translateY(${translateY}px) scale(${scale})`,
+    zIndex: 10 - distance,
+  };
+}
+function onHover(app, index) {
+  hoveredIndex.value = index;
   emit("hover", app.name);
 }
 
 function onLeave() {
+  hoveredIndex.value = null;
   emit("leave");
 }
 
@@ -77,11 +105,10 @@ const [container] = useKeenSlider(
   <div class="slider-wrapper">
     <div ref="container" class="keen-slider">
       <div
-        v-for="app in fetchStore.appList"
+        v-for="(app, index) in fetchStore.appList"
         :key="app.exe"
         class="keen-slider__slide slide-items"
-        :class="`number-slide-${app}`"
-        @mouseenter="onHover(app)"
+        @mouseenter="onHover(app, index)"
         @mouseleave="onLeave()"
         @click="launchApp(app.exe)"
       >
@@ -90,6 +117,7 @@ const [container] = useKeenSlider(
           v-bind:alt="app.name"
           width="48"
           height="48"
+          :style="iconStyle(index)"
         />
       </div>
     </div>
@@ -110,12 +138,12 @@ body {
 
 .slider-wrapper {
   position: relative; /* needed for overlays */
-  background: rgba(255, 255, 255, 0.1);
-  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+  background: rgba(0, 0, 0, 0.3);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
   backdrop-filter: blur(1px);
   -webkit-backdrop-filter: blur(4px);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 1rem;
+  border: 1px solid rgba(115, 115, 155, 0.4);
+  border-radius: 2rem;
   padding: 8px 16px;
   margin-bottom: 1rem;
   margin-top: 3vh;
@@ -137,7 +165,7 @@ body {
   left: 0;
   background: linear-gradient(
     to right,
-    rgba(203, 203, 203, 0.3),
+    rgba(0, 0, 0, 0.3),
     rgba(255, 255, 255, 0.01)
   );
 }
@@ -169,6 +197,9 @@ body {
 .keen-slider__slide {
   height: 64px;
   min-width: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .keen-slider__slide:hover {
@@ -182,12 +213,9 @@ body {
 
 .slide-items svg,
 .slide-items img {
-  transition: 250ms all ease-in-out;
-}
-
-.slide-items:hover svg,
-.slide-items:hover img {
-  transform: translateY(-5px) scale(1.05);
+  transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  transform-origin: 50% 100%;
+  will-change: transform;
 }
 
 .slide-items svg.loading,
