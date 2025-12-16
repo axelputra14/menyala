@@ -1,17 +1,13 @@
 <script setup lang="ts">
-const props = defineProps({
-  app: {
-    type: Object as () => { id: number; name: string; icon: string } | null,
-    default: null,
-  },
-});
+defineProps<{
+  text: string;
+  visible: boolean;
+}>();
 </script>
 
 <template>
-  <div class="tooltip-container" v-if="app">
-    <div class="text-box">
-      <p>{{ app.name }}</p>
-    </div>
+  <div class="tooltip-container" :class="{ visible }">
+    {{ text }}
   </div>
 </template>
 
@@ -21,20 +17,35 @@ const props = defineProps({
 .tooltip-container {
   font-family: "Open Sans", sans-serif;
   font-weight: 500;
-  font-size: 16px;
-  line-height: 0.125rem;
+  font-size: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
   position: absolute;
-  bottom: 100%; /* place above icon */
-  margin-bottom: 6px;
-  min-width: 780px;
+  bottom: 50%; /* place above icon */
+  position: relative;
+  flex: auto;
+  justify-content: center;
+  align-items: center;
 
   background: rgba(0, 0, 0, 0.6);
   box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.17);
   color: white;
-  font-size: 14px;
+  padding: 4px 1rem;
+  border-radius: 8px;
+
+  width: max-content; /* shrink-to-fit */
+  white-space: normal; /* allow wrapping */
+  word-break: break-word; /* handle long names */
+  overflow: hidden;
+  width: fit-content;
+  max-width: 400px;
+
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  line-clamp: 3;
+  -webkit-line-clamp: 3;
+
   padding: 4px 1rem;
   border-radius: 8px;
 
@@ -44,5 +55,9 @@ const props = defineProps({
   transition: opacity 0.2s ease, transform 0.2s ease;
   pointer-events: none;
   z-index: 9999;
+}
+.tooltip-container.visible {
+  opacity: 1;
+  transform: translateY(0);
 }
 </style>

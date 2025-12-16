@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "menyala",
-        "width": 1200,
-        "height": 200,
+        "width": 1300,
+        "height": 260,
         "decorations": false,
         "resizable": false,
         "fullscreen": false,

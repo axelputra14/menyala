@@ -1,19 +1,27 @@
 <script setup lang="ts">
 import Slider from "./components/Slider.vue";
-// import Tooltip from "./components/Tooltip.vue";
-// import { ref } from "vue";
+import Tooltip from "./components/Tooltip.vue";
+import { ref } from "vue";
 
-// const hoveredApp = ref(null);
+const tooltipText = ref("");
+const tooltipVisible = ref(false);
 
-// function onHover(app: any) {
-//   hoveredApp.value = app;
-// }
+function showTooltip(text: string) {
+  tooltipText.value = text;
+  tooltipVisible.value = true;
+}
+
+function hideTooltip() {
+  tooltipVisible.value = false;
+}
 </script>
 
 <template>
   <main class="container hide-scrollbar">
-    <!-- <Tooltip :app="hoveredApp" /> -->
-    <Slider />
+    <div class="flexbox">
+      <Tooltip :text="tooltipText" :visible="tooltipVisible" />
+    </div>
+    <Slider @hover="showTooltip" @leave="hideTooltip" />
   </main>
 </template>
 
@@ -35,11 +43,18 @@ import Slider from "./components/Slider.vue";
 }
 
 .container {
-  margin-top: 3rem;
+  margin-top: 1rem;
   padding-top: 10vh;
   display: flex;
   flex-direction: column;
   justify-content: center;
   text-align: center;
+}
+
+.flexbox {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
 }
 </style>

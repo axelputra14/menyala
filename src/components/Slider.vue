@@ -4,15 +4,21 @@ import { useKeenSlider } from "keen-slider/vue.es";
 import "keen-slider/keen-slider.min.css";
 import { useFetchStore } from "../stores/fetch";
 import { onMounted, defineEmits } from "vue";
-import Tooltip from "./Tooltip.vue";
+
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { invoke } from "@tauri-apps/api/core";
 
 const fetchStore = useFetchStore();
 
+const emit = defineEmits(["hover", "leave"]);
+
 const hoveredApp = ref(null);
 function onHover(app) {
-  hoveredApp.value = app;
+  emit("hover", app.name);
+}
+
+function onLeave() {
+  emit("leave");
 }
 
 function launchApp(exe) {
@@ -76,10 +82,9 @@ const [container] = useKeenSlider(
         class="keen-slider__slide slide-items"
         :class="`number-slide-${app}`"
         @mouseenter="onHover(app)"
-        @mouseleave="onHover(null)"
+        @mouseleave="onLeave()"
         @click="launchApp(app.exe)"
       >
-        <Tooltip :app="app" />
         <img
           :src="convertFileSrc(app.icon)"
           v-bind:alt="app.name"
@@ -95,11 +100,6 @@ const [container] = useKeenSlider(
 /* .tooltip-container {
 
 } */
-
-.slide-items:hover .tooltip-container {
-  opacity: 1;
-  transform: translateY(0);
-}
 
 body {
   margin: 0;
@@ -118,6 +118,7 @@ body {
   border-radius: 1rem;
   padding: 8px 16px;
   margin-bottom: 1rem;
+  margin-top: 3vh;
 }
 
 /* gradient overlays on left + right */
