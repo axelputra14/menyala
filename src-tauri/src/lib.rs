@@ -5,27 +5,26 @@ use tauri::{
 };
 use tauri::{Manager};
 use serde::{Deserialize, Serialize};
-use std::{fs, process::Command};
+use std::{fs};
 use std::fs::File;
 use std::path::PathBuf;
 use sha2::{Sha384, Digest};
 use std::path::Path;
 use std::os::windows::prelude::OsStrExt;
-//use std::ffi::c_void; // Import c_void
-use windows::Win32::{Graphics::Gdi::{DeleteObject, GetDC, ReleaseDC}, UI::WindowsAndMessaging::IMAGE_BITMAP}; // Import GetDC and DeleteObject
-use std::io::{Read, BufReader};
+use windows::Win32::{Graphics::Gdi::{DeleteObject, GetDC, ReleaseDC}}; // Import GetDC and DeleteObject
+use std::io::{Read};
 
 use tauri_plugin_positioner::{WindowExt, Position};
 use tauri::AppHandle;
-use anyhow::{anyhow, Result, Context};
+use anyhow::{Result, Context};
 
 use windows::{
-    core::{Interface, PCWSTR},
+    core::{PCWSTR},
     Win32::{
         UI::{
             Shell::{ExtractIconExW, SHFILEINFOW, SHGFI_SYSICONINDEX, SHGFI_USEFILEATTRIBUTES,
                 SHGetImageList, SHIL_JUMBO, SHGetFileInfoW},
-            WindowsAndMessaging::{DestroyIcon, HICON, GetIconInfo, ICONINFO}
+            WindowsAndMessaging::{HICON, GetIconInfo, ICONINFO}
         },
         Graphics::Gdi::{
             GetObjectW, GetDIBits,
@@ -33,10 +32,8 @@ use windows::{
             DIB_RGB_COLORS,
             BI_RGB
         },
-        Foundation::{HWND},
         System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED},
-    },
-    core::Error as WinError,
+    }
 };
 
 use image::{RgbaImage, ImageEncoder};

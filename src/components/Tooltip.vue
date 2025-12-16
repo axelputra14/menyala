@@ -39,12 +39,12 @@ defineProps<{
   word-break: break-word; /* handle long names */
   overflow: hidden;
   width: fit-content;
-  max-width: 400px;
+  max-width: 1200px;
 
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  line-clamp: 3;
-  -webkit-line-clamp: 3;
+  line-clamp: 1;
+  -webkit-line-clamp: 1;
 
   padding: 4px 1rem;
   border-radius: 8px;

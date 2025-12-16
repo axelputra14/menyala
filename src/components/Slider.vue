@@ -94,8 +94,8 @@ const [container] = useKeenSlider(
   {
     loop: true,
     mode: "snap",
-    rubberband: false,
-    slides: { perView: "auto", spacing: 16 },
+    rubberband: true,
+    slides: { perView: 16, spacing: 16 },
   },
   [wheelControls]
 );
@@ -179,27 +179,22 @@ body {
   );
 }
 
-[class^="number-slide"],
-[class*=" number-slide"] {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  color: #030303;
-  font-weight: 500;
-  max-height: 100vh;
-}
-
 .keen-slider {
   overflow: visible !important; /* no mask anymore */
 }
 
 .keen-slider__slide {
-  height: 64px;
+  min-height: 64px;
   min-width: 64px;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.keen-slider__slide img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .keen-slider__slide:hover {
