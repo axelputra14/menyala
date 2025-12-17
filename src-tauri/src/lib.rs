@@ -155,8 +155,8 @@ fn hicon_to_png_bytes(icon: HICON) -> anyhow::Result<Vec<u8>> {
         //
         // 8. Cleanup icon bitmaps
         //
-        DeleteObject(info.hbmColor.into());
-        DeleteObject(info.hbmMask.into());
+        let _ = DeleteObject(info.hbmColor.into());
+        let _ = DeleteObject(info.hbmMask.into());
 
         Ok(png_bytes)
     }
@@ -281,8 +281,8 @@ fn extract_largest_hicon(path: &std::path::Path) -> anyhow::Result<HICON> {
         };
 
         unsafe {
-            windows::Win32::Graphics::Gdi::DeleteObject(info.hbmColor.into());
-            windows::Win32::Graphics::Gdi::DeleteObject(info.hbmMask.into());
+            let _ = windows::Win32::Graphics::Gdi::DeleteObject(info.hbmColor.into());
+            let _ = windows::Win32::Graphics::Gdi::DeleteObject(info.hbmMask.into());
         }
 
         if ok == 0 {
@@ -318,7 +318,7 @@ fn extract_largest_hicon(path: &std::path::Path) -> anyhow::Result<HICON> {
         if icon_pair.0.is_null() || icon_pair == best_icon {
             continue;
         }
-        unsafe { windows::Win32::UI::WindowsAndMessaging::DestroyIcon(icon_pair) };
+        unsafe { let _ = windows::Win32::UI::WindowsAndMessaging::DestroyIcon(icon_pair); };
     }
 
     Ok(best_icon)
@@ -334,7 +334,7 @@ fn extract_largest_icon_png(path: &std::path::Path) -> anyhow::Result<Vec<u8>> {
 
     // 3. Destroy the icon handle (VERY IMPORTANT)
     unsafe {
-        windows::Win32::UI::WindowsAndMessaging::DestroyIcon(hicon);
+        let _ = windows::Win32::UI::WindowsAndMessaging::DestroyIcon(hicon);
     }
 
     Ok(png_bytes)
@@ -563,8 +563,7 @@ pub fn run() {
                 let _ = win.move_window(Position::BottomCenter);
             }
 
-            let tray = TrayIconBuilder::new()
-
+            let _tray = TrayIconBuilder::new()
             .menu(&menu)
             .show_menu_on_left_click(false)
             .on_menu_event(|app, event| match event.id.as_ref() {
