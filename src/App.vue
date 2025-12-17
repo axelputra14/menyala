@@ -57,4 +57,7 @@ function hideTooltip() {
   justify-content: center;
   align-items: center;
 }
+body {
+  overflow: hidden; /* Hide scrollbars */
+}
 </style>

@@ -14,14 +14,14 @@ const emit = defineEmits(["hover", "leave"]);
 
 // const hoveredApp = ref(null);
 const hoveredIndex = ref(null);
+const pressedIndex = ref(null);
 
 function iconStyle(index) {
+  let scale = 1;
+  let translateY = 0;
   if (hoveredIndex.value === null) return {};
 
   const distance = Math.abs(index - hoveredIndex.value);
-
-  let scale = 1;
-  let translateY = 0;
 
   if (distance === 0) {
     scale = 1.5;
@@ -32,6 +32,10 @@ function iconStyle(index) {
   } else if (distance === 2) {
     scale = 1.1;
     translateY = -4;
+  }
+
+  if (pressedIndex.value === index) {
+    translateY -= 6;
   }
 
   return {
@@ -49,8 +53,18 @@ function onLeave() {
   emit("leave");
 }
 
-function launchApp(exe) {
-  invoke("launch_app", { exe });
+function launchApp(exe, index) {
+  pressedIndex.value = index;
+
+  // visual feedback first
+  setTimeout(() => {
+    pressedIndex.value = null;
+  }, 120);
+
+  // launch slightly after press starts
+  setTimeout(() => {
+    invoke("launch_app", { exe });
+  }, 40);
 }
 
 onMounted(async () => {
@@ -110,13 +124,13 @@ const [container] = useKeenSlider(
         class="keen-slider__slide slide-items"
         @mouseenter="onHover(app, index)"
         @mouseleave="onLeave()"
-        @click="launchApp(app.exe)"
+        @click="launchApp(app.exe, index)"
       >
         <img
           :src="convertFileSrc(app.icon)"
           v-bind:alt="app.name"
-          width="48"
-          height="48"
+          width="64"
+          height="64"
           :style="iconStyle(index)"
         />
       </div>
@@ -143,7 +157,7 @@ body {
   backdrop-filter: blur(1px);
   -webkit-backdrop-filter: blur(4px);
   border: 1px solid rgba(115, 115, 155, 0.4);
-  border-radius: 2rem;
+  border-radius: 1.5rem;
   padding: 8px 16px;
   margin-bottom: 1rem;
   margin-top: 3vh;
@@ -159,6 +173,7 @@ body {
   width: 48px;
   pointer-events: none;
   z-index: 5;
+  border-radius: 1.5rem;
 }
 
 .slider-wrapper::before {
@@ -168,6 +183,7 @@ body {
     rgba(0, 0, 0, 0.3),
     rgba(255, 255, 255, 0.01)
   );
+  border-radius: 1.5rem;
 }
 
 .slider-wrapper::after {
@@ -177,6 +193,7 @@ body {
     rgba(203, 203, 203, 0.3),
     rgba(255, 255, 255, 0.01)
   );
+  border-radius: 1.5rem;
 }
 
 .keen-slider {
@@ -208,7 +225,7 @@ body {
 
 .slide-items svg,
 .slide-items img {
-  transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: transform 160ms ease-out;
   transform-origin: 50% 100%;
   will-change: transform;
 }
@@ -216,29 +233,5 @@ body {
 .slide-items svg.loading,
 .slide-items img.loading {
   animation: 1s loading ease-in infinite;
-}
-
-.slider-wrapper {
-  animation: 2s ease-out 0s 1 wait, 2s ease-out 2s 1 slideInFromBottom;
-}
-
-@keyframes wait {
-  from {
-    transform: translateY(150px);
-  }
-  to {
-    transform: translateY(150px);
-  }
-}
-
-@keyframes slideInFromBottom {
-  from {
-    transform: translateY(150px);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
 }
 </style>
