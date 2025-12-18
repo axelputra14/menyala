@@ -3,5 +3,20 @@
   "identifier": "default",
   "description": "Capability for the main window",
   "windows": ["main"],
-  "permissions": ["core:default", "opener:default", "positioner:default"]
+  "permissions": [
+    "core:default",
+    "opener:default",
+    "positioner:default",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        {
+          "path": "/path/to/file"
+        },
+        {
+          "path": "$APPDATA/file"
+        }
+      ]
+    }
+  ]
 }

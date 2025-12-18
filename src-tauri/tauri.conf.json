@@ -19,7 +19,9 @@
         "resizable": false,
         "fullscreen": false,
         "transparent": true,
-        "shadow": false
+        "shadow": false,
+        "focus": false,
+        "skipTaskbar": true
       }
     ],
     "security": {

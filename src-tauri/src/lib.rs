@@ -3,6 +3,7 @@ use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
 };
+
 use tauri::{Manager};
 use serde::{Deserialize, Serialize};
 use std::{fs};
@@ -13,7 +14,7 @@ use std::path::Path;
 use std::os::windows::prelude::OsStrExt;
 use windows::Win32::{Graphics::Gdi::{DeleteObject, GetDC, ReleaseDC}}; // Import GetDC and DeleteObject
 use std::io::{Read};
-
+use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_positioner::{WindowExt, Position};
 use tauri::AppHandle;
 use anyhow::{Result, Context};
@@ -554,10 +555,12 @@ pub fn run() {
                 let _ = win.set_focus();
             }
         }))
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            let open_i = MenuItem::with_id(app, "open", "Open AppData", true, None::<&str>)?;
             let refresh_i = MenuItem::with_id(app, "refresh", "Refresh Apps", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&refresh_i, &quit_i])?;
+            let menu = Menu::with_items(app, &[&open_i, &refresh_i, &quit_i])?;
 
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.move_window(Position::BottomCenter);
@@ -567,6 +570,16 @@ pub fn run() {
             .menu(&menu)
             .show_menu_on_left_click(false)
             .on_menu_event(|app, event| match event.id.as_ref() {
+                "open" => {
+                    let config_dir = match app.path().app_config_dir() {
+                    Ok(path) => path.to_string_lossy().into_owned(),
+                    Err(err) => {
+                        eprintln!("Failed to get config dir: {err}");
+                        return;
+                        }
+                    };
+                    let _ = app.opener().open_path(config_dir, None::<&str>);
+                }
                 "refresh" => {
                     println!("refresh menu item was clicked");
                     refresh_apps_impl(&app).unwrap();
