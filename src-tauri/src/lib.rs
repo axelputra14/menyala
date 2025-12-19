@@ -1,7 +1,7 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use tauri::{
     menu::{Menu, MenuItem},
-    tray::TrayIconBuilder,
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 
 use tauri::{Manager};
@@ -569,6 +569,25 @@ pub fn run() {
             let _tray = TrayIconBuilder::new()
             .menu(&menu)
             .show_menu_on_left_click(false)
+            .on_tray_icon_event(|tray, event| match event {
+                TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+                } => {
+                println!("left click pressed and released");
+                // in this example, let's show and focus the main window when the tray is clicked
+                let app = tray.app_handle();
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.unminimize();
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+                }
+                _ => {
+                println!("unhandled event {event:?}");
+                }
+            })
             .on_menu_event(|app, event| match event.id.as_ref() {
                 "open" => {
                     let config_dir = match app.path().app_config_dir() {

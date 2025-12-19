@@ -43,11 +43,11 @@ function hideTooltip() {
 }
 
 .container {
-  margin-top: 1rem;
+  margin-top: 0.25rem;
   padding-top: 10vh;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-end;
   text-align: center;
 }
 

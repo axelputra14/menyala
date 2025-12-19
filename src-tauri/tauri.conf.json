@@ -14,14 +14,17 @@
       {
         "title": "menyala",
         "width": 1300,
-        "height": 260,
+        "height": 210,
         "decorations": false,
         "resizable": false,
         "fullscreen": false,
         "transparent": true,
         "shadow": false,
         "focus": false,
-        "skipTaskbar": true
+        "skipTaskbar": true,
+        "maximizable": false,
+        "minimizable": false,
+        "closable": true
       }
     ],
     "security": {

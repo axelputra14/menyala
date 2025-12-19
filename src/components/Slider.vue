@@ -1,14 +1,15 @@
 <script setup>
-import { ref } from "vue";
+import { ref, onMounted } from "vue";
 import { useKeenSlider } from "keen-slider/vue.es";
 import "keen-slider/keen-slider.min.css";
 import { useFetchStore } from "../stores/fetch";
-import { onMounted } from "vue";
 
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { invoke } from "@tauri-apps/api/core";
 
 const fetchStore = useFetchStore();
+
+// const loading = ref(true);
 
 const emit = defineEmits(["hover", "leave"]);
 
@@ -66,12 +67,6 @@ function launchApp(exe, index) {
     invoke("launch_app", { exe });
   }, 40);
 }
-
-onMounted(async () => {
-  await fetchStore.getApps();
-  await fetchStore.refreshApps();
-});
-
 const wheelControls = (slider) => {
   let touchTimeout;
   let position = { x: 0 };
@@ -104,15 +99,21 @@ const wheelControls = (slider) => {
   });
 };
 
-const [container] = useKeenSlider(
+const [container, slider] = useKeenSlider(
   {
     loop: true,
-    mode: "snap",
+    mode: "free-snap",
     rubberband: true,
     slides: { perView: 16, spacing: 16 },
   },
   [wheelControls]
 );
+
+onMounted(async () => {
+  await fetchStore.getApps();
+  await fetchStore.refreshApps();
+  slider.value?.update();
+});
 </script>
 
 <template>
@@ -159,7 +160,7 @@ body {
   border: 1px solid rgba(115, 115, 155, 0.4);
   border-radius: 1.5rem;
   padding: 8px 16px;
-  margin-bottom: 1rem;
+  margin-bottom: 0.25rem;
   margin-top: 3vh;
 }
 
