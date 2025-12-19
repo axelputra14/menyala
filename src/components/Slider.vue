@@ -104,7 +104,7 @@ const [container, slider] = useKeenSlider(
     loop: true,
     mode: "free-snap",
     rubberband: true,
-    slides: { perView: 16, spacing: 16 },
+    slides: { perView: 12, spacing: 32 },
   },
   [wheelControls]
 );
