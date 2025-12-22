@@ -1,0 +1,14 @@
+[
+  {
+    "name": "DBeaver",
+    "exe": "C:\\Users\\Axel\\AppData\\Local\\DBeaver\\dbeaver.exe",
+    "publisher": "DBeaver",
+    "icon": null
+  },
+  {
+    "name": "Notepad",
+    "exe": "C:\\Windows\\notepad.exe",
+    "publisher": "Notepad Team",
+    "icon": null
+  }
+]
