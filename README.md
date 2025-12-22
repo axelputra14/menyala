@@ -1,7 +1,5 @@
-# Tauri + Vue + TypeScript
+# Menyala
 
-This template should help get you started developing with Vue 3 and TypeScript in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+A hobby project, a Mac dock inspired application but catered for personal use. Uses Tauri framework with Rust as backend, Vue3 + pure CSS as the frontend, and Keen Slider for the icon carousel library. It's developed like a desktop widget, has tray, data source from json, and icon caching. Not exactly the most polished but I'm proud of this fun project learning a lot more.
 
-## Recommended IDE Setup
-
-- [VS Code](https://code.visualstudio.com/) + [Vue - Official](https://marketplace.visualstudio.com/items?itemName=Vue.volar) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+Menyala in Indonesian means "lit on" or "turned on", it's very wide in meaning. Can also be used loosely for launching application, hence the name. Also coincidentally Menyala is a meme that roughly means "lit or amazing". Great coincidence.
