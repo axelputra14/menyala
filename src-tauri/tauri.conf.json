@@ -20,11 +20,13 @@
         "fullscreen": false,
         "transparent": true,
         "shadow": false,
-        "focus": false,
+        "focusable": false,
         "skipTaskbar": true,
         "maximizable": false,
-        "minimizable": false,
-        "closable": true
+        "minimizable": true,
+        "closable": true,
+        "focus": false,
+        "alwaysOnBottom": true
       }
     ],
     "security": {
