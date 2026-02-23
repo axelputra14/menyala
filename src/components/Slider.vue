@@ -75,7 +75,7 @@ const wheelControls = (slider) => {
   const dispatch = (e, name) => {
     position.x -= e.deltaY;
     slider.container.dispatchEvent(
-      new CustomEvent(name, { detail: { x: position.x, y: 0 } })
+      new CustomEvent(name, { detail: { x: position.x, y: 0 } }),
     );
   };
 
@@ -104,9 +104,9 @@ const [container, slider] = useKeenSlider(
     loop: true,
     mode: "free-snap",
     rubberband: true,
-    slides: { perView: 12, spacing: 32 },
+    slides: { perView: 8, spacing: 32 },
   },
-  [wheelControls]
+  [wheelControls],
 );
 
 onMounted(async () => {
@@ -202,8 +202,8 @@ body {
 }
 
 .keen-slider__slide {
-  min-height: 64px;
-  min-width: 64px;
+  max-height: 64px;
+  max-width: 64px;
   display: flex;
   align-items: center;
   justify-content: center;
