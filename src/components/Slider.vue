@@ -75,7 +75,7 @@ const wheelControls = (slider) => {
   const dispatch = (e, name) => {
     position.x -= e.deltaY;
     slider.container.dispatchEvent(
-      new CustomEvent(name, { detail: { x: position.x, y: 0 } })
+      new CustomEvent(name, { detail: { x: position.x, y: 0 } }),
     );
   };
 
@@ -104,9 +104,9 @@ const [container, slider] = useKeenSlider(
     loop: true,
     mode: "free-snap",
     rubberband: true,
-    slides: { perView: 12, spacing: 32 },
+    slides: { perView: 8, spacing: 32 },
   },
-  [wheelControls]
+  [wheelControls],
 );
 
 onMounted(async () => {
@@ -154,14 +154,13 @@ body {
 .slider-wrapper {
   position: relative; /* needed for overlays */
   background: rgba(0, 0, 0, 0.3);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-  backdrop-filter: blur(1px);
-  -webkit-backdrop-filter: blur(4px);
   border: 1px solid rgba(115, 115, 155, 0.4);
   border-radius: 1.5rem;
   padding: 8px 16px;
   margin-bottom: 0.25rem;
   margin-top: 3vh;
+  /* macOS dock-style: bottom-only shadow via negative spread */
+  box-shadow: 0 12px 24px -20px rgba(0, 0, 0, 0.6);
 }
 
 /* gradient overlays on left + right */
@@ -191,7 +190,7 @@ body {
   right: 0;
   background: linear-gradient(
     to left,
-    rgba(203, 203, 203, 0.3),
+    rgba(0, 0, 0, 0.3),
     rgba(255, 255, 255, 0.01)
   );
   border-radius: 1.5rem;
@@ -202,8 +201,8 @@ body {
 }
 
 .keen-slider__slide {
-  min-height: 64px;
-  min-width: 64px;
+  max-height: 64px;
+  max-width: 64px;
   display: flex;
   align-items: center;
   justify-content: center;
