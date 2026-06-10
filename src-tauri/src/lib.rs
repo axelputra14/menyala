@@ -454,6 +454,12 @@ fn get_apps(app: tauri::AppHandle) -> Result<Vec<AppEntry>, String> {
     load_apps(&json_path).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn update_apps(app: tauri::AppHandle, apps: Vec<AppEntry>) -> Result<(), String> {
+    let json_path = ensure_apps_json(&app).map_err(|e| e.to_string())?;
+    save_apps(&json_path, &apps).map_err(|e| e.to_string())
+}
+
 fn ensure_apps_json(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
     // 1. Find (or create) the user config dir
     let config_dir = app.path().app_config_dir()
@@ -625,7 +631,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_apps, refresh_apps, launch_app])
+        .invoke_handler(tauri::generate_handler![get_apps, refresh_apps, launch_app, update_apps])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
