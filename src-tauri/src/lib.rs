@@ -4,7 +4,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 
-use tauri::{Manager};
+use tauri::{Manager, Emitter};
 use serde::{Deserialize, Serialize};
 use std::{fs};
 use std::fs::File;
@@ -411,7 +411,7 @@ fn refresh_apps_impl(app: &tauri::AppHandle) -> Result<Vec<AppEntry>, String>{
     if changed {
         save_apps(&json_path, &apps).map_err(|e| e.to_string())?;
     }
-
+    return_position(&app);
     Ok(apps)
 }
 
@@ -452,6 +452,12 @@ pub fn ensure_icocache_dir(app: &AppHandle) -> Result<PathBuf> {
 fn get_apps(app: tauri::AppHandle) -> Result<Vec<AppEntry>, String> {
     let json_path = ensure_apps_json(&app).map_err(|e| e.to_string())?;
     load_apps(&json_path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn update_apps(app: tauri::AppHandle, apps: Vec<AppEntry>) -> Result<(), String> {
+    let json_path = ensure_apps_json(&app).map_err(|e| e.to_string())?;
+    save_apps(&json_path, &apps).map_err(|e| e.to_string())
 }
 
 fn ensure_apps_json(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
@@ -545,6 +551,19 @@ fn launch_app(exe: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn return_position(app: &tauri::AppHandle) -> () {
+
+    if let Some(win) = app.get_webview_window("main") {
+        for _ in 1..=2{
+            let _ = win.move_window(Position::BottomCenter);
+            let _ = win.set_size(tauri::Size::Physical(
+                tauri::PhysicalSize::new(650, 210)
+            ));
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -559,8 +578,9 @@ pub fn run() {
         .setup(|app| {
             let open_i = MenuItem::with_id(app, "open", "Open AppData", true, None::<&str>)?;
             let refresh_i = MenuItem::with_id(app, "refresh", "Refresh Apps", true, None::<&str>)?;
+            let edit_i = MenuItem::with_id(app, "edit", "Edit Apps", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open_i, &refresh_i, &quit_i])?;
+            let menu = Menu::with_items(app, &[&open_i, &refresh_i, &edit_i, &quit_i])?;
 
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.move_window(Position::BottomCenter);
@@ -600,9 +620,24 @@ pub fn run() {
                     let _ = app.opener().open_path(config_dir, None::<&str>);
                 }
                 "refresh" => {
-                    println!("refresh menu item was clicked");
+                    
+                    return_position(&app);
                     refresh_apps_impl(&app).unwrap();
                 }
+                "edit" => {
+                        //println!("edit menu item was clicked");
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.unminimize();
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                            let _ = window.set_size(tauri::Size::Physical(
+                                tauri::PhysicalSize::new(1050, 1050)
+                            ));
+    
+                            let _ = window.center();
+                        }
+                        let _ = app.emit("show-editor", ());
+                    }
                 "quit" => {
                     println!("quit menu item was clicked");
                         app.exit(0);
@@ -617,15 +652,15 @@ pub fn run() {
             .build(app)?;
             // let handle = app.handle();
             let json_path = ensure_apps_json(&app.handle())?;
-            println!("Using apps.json at: {}", json_path.display());
+            //println!("Using apps.json at: {}", json_path.display());
             // handle cache dir
             let cache_dir = ensure_icocache_dir(&app.handle())?;
-            println!("Icon cache directory: {}", cache_dir.display());
+            //println!("Icon cache directory: {}", cache_dir.display());
             
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_apps, refresh_apps, launch_app])
+        .invoke_handler(tauri::generate_handler![get_apps, refresh_apps, launch_app, update_apps])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

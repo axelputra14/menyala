@@ -1,10 +1,27 @@
 <script setup lang="ts">
 import Slider from "./components/Slider.vue";
 import Tooltip from "./components/Tooltip.vue";
-import { ref } from "vue";
+import AppEditor from "./components/AppEditor.vue";
+import { ref, onMounted, onUnmounted } from "vue";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 const tooltipText = ref("");
 const tooltipVisible = ref(false);
+const editorVisible = ref(false);
+
+let unlistenShowEditor: UnlistenFn | undefined;
+
+onMounted(async () => {
+  unlistenShowEditor = await listen("show-editor", () => {
+    editorVisible.value = true;
+  });
+});
+
+onUnmounted(() => {
+  if (unlistenShowEditor) {
+    unlistenShowEditor();
+  }
+});
 
 function showTooltip(text: string) {
   tooltipText.value = text;
@@ -21,7 +38,10 @@ function hideTooltip() {
     <div class="flexbox">
       <Tooltip :text="tooltipText" :visible="tooltipVisible" />
     </div>
+
     <Slider @hover="showTooltip" @leave="hideTooltip" />
+
+    <AppEditor :visible="editorVisible" @close="editorVisible = false" />
   </main>
 </template>
 
@@ -49,6 +69,7 @@ function hideTooltip() {
   flex-direction: column;
   justify-content: flex-end;
   text-align: center;
+  position: relative;
 }
 
 .flexbox {
@@ -57,6 +78,7 @@ function hideTooltip() {
   justify-content: center;
   align-items: center;
 }
+
 body {
   overflow: hidden; /* Hide scrollbars */
 }
