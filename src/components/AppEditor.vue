@@ -24,7 +24,7 @@ watch(
       errorMsg.value = "";
     }
   },
-  { immediate: true }
+  { immediate: true },
 );
 
 function addApp() {
@@ -99,79 +99,82 @@ async function saveChanges() {
         </div>
 
         <div class="editor-list hide-scrollbar">
-          <div
-            v-for="(app, index) in localApps"
-            :key="index"
-            class="app-edit-card"
-          >
-            <div class="card-left">
-              <div class="reorder-controls">
-                <button
-                  class="btn-arrow"
-                  :disabled="index === 0"
-                  @click="moveApp(index, -1)"
-                  title="Move Up"
-                >
-                  ▲
-                </button>
-                <button
-                  class="btn-arrow"
-                  :disabled="index === localApps.length - 1"
-                  @click="moveApp(index, 1)"
-                  title="Move Down"
-                >
-                  ▼
-                </button>
-              </div>
-            </div>
-
-            <div class="card-inputs">
-              <div class="input-row">
-                <div class="input-group">
-                  <label>Name</label>
-                  <input
-                    type="text"
-                    v-model="app.name"
-                    placeholder="e.g. VS Code"
-                  />
-                </div>
-                <div class="input-group">
-                  <label>Publisher</label>
-                  <input
-                    type="text"
-                    v-model="app.publisher"
-                    placeholder="e.g. Microsoft"
-                  />
+          <TransitionGroup name="list" tag="div">
+            <div
+              v-for="(app, index) in localApps"
+              :key="index"
+              class="app-edit-card"
+            >
+              <div class="card-left">
+                <div class="reorder-controls">
+                  <button
+                    class="btn-arrow"
+                    :disabled="index === 0"
+                    @click="moveApp(index, -1)"
+                    title="Move Up"
+                  >
+                    ▲
+                  </button>
+                  <button
+                    class="btn-arrow"
+                    :disabled="index === localApps.length - 1"
+                    @click="moveApp(index, 1)"
+                    title="Move Down"
+                  >
+                    ▼
+                  </button>
                 </div>
               </div>
-              <div class="input-group full-width">
-                <label>Executable Path</label>
-                <input
-                  type="text"
-                  v-model="app.exe"
-                  placeholder="C:\Path\to\app.exe"
-                />
+
+              <div class="card-inputs">
+                <div class="input-row">
+                  <div class="input-group">
+                    <label>Name</label>
+                    <input
+                      type="text"
+                      v-model="app.name"
+                      placeholder="e.g. VS Code"
+                    />
+                  </div>
+                  <div class="input-group">
+                    <label>Publisher</label>
+                    <input
+                      type="text"
+                      v-model="app.publisher"
+                      placeholder="e.g. Microsoft"
+                    />
+                  </div>
+                </div>
+                <div class="input-group full-width">
+                  <label>Executable Path</label>
+                  <input
+                    type="text"
+                    v-model="app.exe"
+                    placeholder="C:\Path\to\app.exe"
+                  />
+                </div>
+              </div>
+
+              <div class="card-actions">
+                <button
+                  class="btn-delete"
+                  @click="removeApp(index)"
+                  title="Remove application"
+                >
+                  Delete
+                </button>
               </div>
             </div>
-
-            <div class="card-actions">
-              <button
-                class="btn-delete"
-                @click="removeApp(index)"
-                title="Remove application"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-
+          </TransitionGroup>
           <div v-if="localApps.length === 0" class="empty-state">
             No applications configured. Click below to add one.
           </div>
         </div>
 
         <div class="editor-footer">
-          <button class="btn-secondary" @click="addApp">+ Add Application</button>
+          <button class="btn-secondary" @click="addApp">
+            + Add Application
+          </button>
           <div class="footer-right">
             <button class="btn-ghost" @click="emit('close')">Cancel</button>
             <button
@@ -189,6 +192,24 @@ async function saveChanges() {
 </template>
 
 <style scoped>
+.list-move, /* apply transition to moving elements */
+.list-enter-active,
+.list-leave-active {
+  transition: all 0.5s ease;
+}
+
+.list-enter-from,
+.list-leave-to {
+  opacity: 0;
+  transform: translateX(30px);
+}
+
+/* ensure leaving items are taken out of layout flow so that moving
+   animations can be calculated correctly. */
+.list-leave-active {
+  position: absolute;
+}
+
 .editor-overlay {
   position: fixed;
   top: 0;
@@ -211,8 +232,9 @@ async function saveChanges() {
   background: rgba(20, 20, 30, 0.75);
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 1.5rem;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5),
-              inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  box-shadow:
+    0 20px 40px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
   display: flex;
   flex-direction: column;
   color: #f3f4f6;
@@ -278,7 +300,9 @@ async function saveChanges() {
   border-radius: 0.75rem;
   padding: 1rem;
   gap: 1rem;
-  transition: background 0.2s, border-color 0.2s;
+  transition:
+    background 0.2s,
+    border-color 0.2s;
 }
 
 .app-edit-card:hover {
@@ -360,7 +384,9 @@ async function saveChanges() {
   color: #fff;
   font-family: inherit;
   font-size: 0.875rem;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
 }
 
 .input-group input:focus {
@@ -412,7 +438,9 @@ async function saveChanges() {
   gap: 0.75rem;
 }
 
-.btn-primary, .btn-secondary, .btn-ghost {
+.btn-primary,
+.btn-secondary,
+.btn-ghost {
   font-family: inherit;
   font-size: 0.875rem;
   font-weight: 500;

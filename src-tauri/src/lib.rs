@@ -4,7 +4,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 
-use tauri::{Manager};
+use tauri::{Manager, Emitter};
 use serde::{Deserialize, Serialize};
 use std::{fs};
 use std::fs::File;
@@ -565,8 +565,9 @@ pub fn run() {
         .setup(|app| {
             let open_i = MenuItem::with_id(app, "open", "Open AppData", true, None::<&str>)?;
             let refresh_i = MenuItem::with_id(app, "refresh", "Refresh Apps", true, None::<&str>)?;
+            let edit_i = MenuItem::with_id(app, "edit", "Edit Apps", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open_i, &refresh_i, &quit_i])?;
+            let menu = Menu::with_items(app, &[&open_i, &refresh_i, &edit_i, &quit_i])?;
 
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.move_window(Position::BottomCenter);
@@ -609,6 +610,15 @@ pub fn run() {
                     println!("refresh menu item was clicked");
                     refresh_apps_impl(&app).unwrap();
                 }
+                "edit" => {
+                        println!("edit menu item was clicked");
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.unminimize();
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                        let _ = app.emit("show-editor", ());
+                    }
                 "quit" => {
                     println!("quit menu item was clicked");
                         app.exit(0);
