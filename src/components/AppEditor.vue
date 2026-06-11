@@ -258,7 +258,7 @@ async function resetPos() {
 .editor-modal {
   width: 90%;
   max-width: 650px;
-  height: 80vh;
+  height: 90vh;
   background: rgba(20, 20, 30, 0.75);
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 1rem;
