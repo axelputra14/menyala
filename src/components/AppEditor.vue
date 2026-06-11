@@ -20,7 +20,10 @@ watch(
   () => props.visible,
   (newVal) => {
     if (newVal) {
-      localApps.value = fetchStore.appList.map((app) => ({ ...app }));
+      localApps.value = fetchStore.appList.map((app) => ({
+        ...app,
+        id: crypto.randomUUID(),
+      }));
       errorMsg.value = "";
     }
   },
@@ -29,6 +32,7 @@ watch(
 
 function addApp() {
   localApps.value.push({
+    id: crypto.randomUUID(),
     name: "New App",
     exe: "",
     publisher: "Custom",
@@ -99,73 +103,72 @@ async function saveChanges() {
         </div>
 
         <div class="editor-list hide-scrollbar">
-          <TransitionGroup name="list" tag="div">
-            <div
-              v-for="(app, index) in localApps"
-              :key="index"
-              class="app-edit-card"
-            >
-              <div class="card-left">
-                <div class="reorder-controls">
-                  <button
-                    class="btn-arrow"
-                    :disabled="index === 0"
-                    @click="moveApp(index, -1)"
-                    title="Move Up"
-                  >
-                    ▲
-                  </button>
-                  <button
-                    class="btn-arrow"
-                    :disabled="index === localApps.length - 1"
-                    @click="moveApp(index, 1)"
-                    title="Move Down"
-                  >
-                    ▼
-                  </button>
-                </div>
-              </div>
-
-              <div class="card-inputs">
-                <div class="input-row">
-                  <div class="input-group">
-                    <label>Name</label>
-                    <input
-                      type="text"
-                      v-model="app.name"
-                      placeholder="e.g. VS Code"
-                    />
-                  </div>
-                  <div class="input-group">
-                    <label>Publisher</label>
-                    <input
-                      type="text"
-                      v-model="app.publisher"
-                      placeholder="e.g. Microsoft"
-                    />
-                  </div>
-                </div>
-                <div class="input-group full-width">
-                  <label>Executable Path</label>
-                  <input
-                    type="text"
-                    v-model="app.exe"
-                    placeholder="C:\Path\to\app.exe"
-                  />
-                </div>
-              </div>
-
-              <div class="card-actions">
+          <div
+            v-for="(app, index) in localApps"
+            :key="app.id"
+            class="app-edit-card"
+          >
+            <div class="card-left">
+              <div class="reorder-controls">
                 <button
-                  class="btn-delete"
-                  @click="removeApp(index)"
-                  title="Remove application"
+                  class="btn-arrow"
+                  :disabled="index === 0"
+                  @click="moveApp(index, -1)"
+                  title="Move Up"
                 >
-                  Delete
+                  ▲
+                </button>
+                <button
+                  class="btn-arrow"
+                  :disabled="index === localApps.length - 1"
+                  @click="moveApp(index, 1)"
+                  title="Move Down"
+                >
+                  ▼
                 </button>
               </div>
             </div>
-          </TransitionGroup>
+
+            <div class="card-inputs">
+              <div class="input-row">
+                <div class="input-group">
+                  <label>Name</label>
+                  <input
+                    type="text"
+                    v-model="app.name"
+                    placeholder="e.g. VS Code"
+                  />
+                </div>
+                <div class="input-group">
+                  <label>Publisher</label>
+                  <input
+                    type="text"
+                    v-model="app.publisher"
+                    placeholder="e.g. Microsoft"
+                  />
+                </div>
+              </div>
+              <div class="input-group full-width">
+                <label>Executable Path</label>
+                <input
+                  type="text"
+                  v-model="app.exe"
+                  placeholder="C:\Path\to\app.exe"
+                />
+              </div>
+            </div>
+
+            <div class="card-actions">
+              <button
+                class="btn-delete"
+                @click="removeApp(index)"
+                title="Remove application"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+
           <div v-if="localApps.length === 0" class="empty-state">
             No applications configured. Click below to add one.
           </div>
@@ -191,17 +194,17 @@ async function saveChanges() {
   </Transition>
 </template>
 
-<style scoped>
+<style>
 .list-move, /* apply transition to moving elements */
 .list-enter-active,
 .list-leave-active {
-  transition: all 0.5s ease;
+  transition: all 0.5s cubic-bezier(0.55, 0, 0.1, 1);
 }
 
 .list-enter-from,
 .list-leave-to {
   opacity: 0;
-  transform: translateX(30px);
+  transform: scaleY(0.01) translate(30px, 0);
 }
 
 /* ensure leaving items are taken out of layout flow so that moving
@@ -210,19 +213,39 @@ async function saveChanges() {
   position: absolute;
 }
 
+/* Animations */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.5s cubic-bezier(0.55, 0, 0.1, 1);
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+  transform: scaleY(0.01) translate(30px, 0);
+}
+</style>
+
+<style scoped>
+.apps-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  position: relative;
+}
 .editor-overlay {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.4);
+
   backdrop-filter: blur(8px);
   z-index: 100;
   display: flex;
   justify-content: center;
   align-items: center;
-  animation: fadeIn 0.2s ease-out;
+  animation: fadeIn 0.5s ease-out;
 }
 
 .editor-modal {
@@ -231,15 +254,12 @@ async function saveChanges() {
   height: 80vh;
   background: rgba(20, 20, 30, 0.75);
   border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 1.5rem;
-  box-shadow:
-    0 20px 40px rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  border-radius: 1rem;
+
   display: flex;
   flex-direction: column;
   color: #f3f4f6;
   overflow: hidden;
-  backdrop-filter: blur(16px);
 }
 
 .editor-header {
@@ -266,7 +286,7 @@ async function saveChanges() {
   cursor: pointer;
   padding: 4px;
   line-height: 1;
-  transition: color 0.2s;
+  transition: color 0.5s;
 }
 
 .btn-close:hover {
@@ -301,8 +321,8 @@ async function saveChanges() {
   padding: 1rem;
   gap: 1rem;
   transition:
-    background 0.2s,
-    border-color 0.2s;
+    background 0.5s,
+    border-color 0.5s;
 }
 
 .app-edit-card:hover {
@@ -333,7 +353,7 @@ async function saveChanges() {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.5s;
 }
 
 .btn-arrow:hover:not(:disabled) {
@@ -385,8 +405,8 @@ async function saveChanges() {
   font-family: inherit;
   font-size: 0.875rem;
   transition:
-    border-color 0.2s,
-    box-shadow 0.2s;
+    border-color 0.5s,
+    box-shadow 0.5s;
 }
 
 .input-group input:focus {
@@ -408,7 +428,7 @@ async function saveChanges() {
   padding: 0.5rem 0.75rem;
   font-size: 0.825rem;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.5s;
 }
 
 .btn-delete:hover {
@@ -447,7 +467,7 @@ async function saveChanges() {
   border-radius: 0.5rem;
   padding: 0.5rem 1rem;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.5s;
 }
 
 .btn-primary {
@@ -486,17 +506,6 @@ async function saveChanges() {
 
 .btn-ghost:hover {
   color: #fff;
-}
-
-/* Animations */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.25s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
 }
 
 .hide-scrollbar::-webkit-scrollbar {

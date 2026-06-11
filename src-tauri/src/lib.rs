@@ -607,15 +607,26 @@ pub fn run() {
                     let _ = app.opener().open_path(config_dir, None::<&str>);
                 }
                 "refresh" => {
-                    println!("refresh menu item was clicked");
+                    //println!("refresh menu item was clicked");
+                    if let Some(win) = app.get_webview_window("main") {
+                        let _ = win.move_window(Position::BottomCenter);
+                        let _ = win.set_size(tauri::Size::Physical(
+                            tauri::PhysicalSize::new(650, 210)
+                        ));
+                    }
                     refresh_apps_impl(&app).unwrap();
                 }
                 "edit" => {
-                        println!("edit menu item was clicked");
+                        //println!("edit menu item was clicked");
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.unminimize();
                             let _ = window.show();
                             let _ = window.set_focus();
+                            let _ = window.set_size(tauri::Size::Physical(
+                                tauri::PhysicalSize::new(1050, 1050)
+                            ));
+    
+                            let _ = window.center();
                         }
                         let _ = app.emit("show-editor", ());
                     }
@@ -633,10 +644,10 @@ pub fn run() {
             .build(app)?;
             // let handle = app.handle();
             let json_path = ensure_apps_json(&app.handle())?;
-            println!("Using apps.json at: {}", json_path.display());
+            //println!("Using apps.json at: {}", json_path.display());
             // handle cache dir
             let cache_dir = ensure_icocache_dir(&app.handle())?;
-            println!("Icon cache directory: {}", cache_dir.display());
+            //println!("Icon cache directory: {}", cache_dir.display());
             
 
             Ok(())
