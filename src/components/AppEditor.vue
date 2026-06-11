@@ -87,6 +87,9 @@ async function saveChanges() {
     isSaving.value = false;
   }
 }
+async function resetPos() {
+  await fetchStore.refreshApps();
+}
 </script>
 
 <template>
@@ -95,7 +98,9 @@ async function saveChanges() {
       <div class="editor-modal">
         <div class="editor-header">
           <h2>Manage Applications</h2>
-          <button class="btn-close" @click="emit('close')">&times;</button>
+          <button class="btn-close" @click="(emit('close'), resetPos())">
+            &times;
+          </button>
         </div>
 
         <div v-if="errorMsg" class="error-banner">
@@ -179,7 +184,9 @@ async function saveChanges() {
             + Add Application
           </button>
           <div class="footer-right">
-            <button class="btn-ghost" @click="emit('close')">Cancel</button>
+            <button class="btn-ghost" @click="(emit('close'), resetPos())">
+              Cancel
+            </button>
             <button
               class="btn-primary"
               :disabled="isSaving"

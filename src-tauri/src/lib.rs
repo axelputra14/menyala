@@ -411,7 +411,7 @@ fn refresh_apps_impl(app: &tauri::AppHandle) -> Result<Vec<AppEntry>, String>{
     if changed {
         save_apps(&json_path, &apps).map_err(|e| e.to_string())?;
     }
-
+    return_position(&app);
     Ok(apps)
 }
 
@@ -551,6 +551,19 @@ fn launch_app(exe: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn return_position(app: &tauri::AppHandle) -> () {
+
+    if let Some(win) = app.get_webview_window("main") {
+        for _ in 1..=2{
+            let _ = win.move_window(Position::BottomCenter);
+            let _ = win.set_size(tauri::Size::Physical(
+                tauri::PhysicalSize::new(650, 210)
+            ));
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -607,13 +620,8 @@ pub fn run() {
                     let _ = app.opener().open_path(config_dir, None::<&str>);
                 }
                 "refresh" => {
-                    //println!("refresh menu item was clicked");
-                    if let Some(win) = app.get_webview_window("main") {
-                        let _ = win.move_window(Position::BottomCenter);
-                        let _ = win.set_size(tauri::Size::Physical(
-                            tauri::PhysicalSize::new(650, 210)
-                        ));
-                    }
+                    
+                    return_position(&app);
                     refresh_apps_impl(&app).unwrap();
                 }
                 "edit" => {
