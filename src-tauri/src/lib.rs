@@ -574,7 +574,6 @@ pub fn run() {
                 let _ = win.set_focus();
             }
         }))
-        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let open_i = MenuItem::with_id(app, "open", "Open AppData", true, None::<&str>)?;
             let refresh_i = MenuItem::with_id(app, "refresh", "Refresh Apps", true, None::<&str>)?;
@@ -651,10 +650,10 @@ pub fn run() {
             .icon(app.default_window_icon().unwrap().clone())
             .build(app)?;
             // let handle = app.handle();
-            let json_path = ensure_apps_json(&app.handle())?;
+            ensure_apps_json(&app.handle())?;
             //println!("Using apps.json at: {}", json_path.display());
             // handle cache dir
-            let cache_dir = ensure_icocache_dir(&app.handle())?;
+            ensure_icocache_dir(&app.handle())?;
             //println!("Icon cache directory: {}", cache_dir.display());
             
 
