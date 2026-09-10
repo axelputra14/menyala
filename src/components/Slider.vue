@@ -121,7 +121,7 @@ onMounted(async () => {
     <div ref="container" class="keen-slider">
       <div
         v-for="(app, index) in fetchStore.appList"
-        :key="app.exe"
+        :key="app.id"
         class="keen-slider__slide slide-items"
         @mouseenter="onHover(app, index)"
         @mouseleave="onLeave()"

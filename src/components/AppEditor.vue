@@ -22,7 +22,7 @@ watch(
     if (newVal) {
       localApps.value = fetchStore.appList.map((app) => ({
         ...app,
-        id: crypto.randomUUID(),
+        id: app.id ?? crypto.randomUUID(),
       }));
       errorMsg.value = "";
     }

@@ -42,6 +42,8 @@ use image::codecs::png::PngEncoder;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppEntry {
+    #[serde(default)]
+    pub id: Option<String>,
     pub name: String,
     pub exe: String,
     pub publisher: String,
@@ -92,7 +94,7 @@ fn hicon_to_png_bytes(icon: HICON) -> anyhow::Result<Vec<u8>> {
 
         let hdc = GetDC(None);
         if hdc.0.is_null() {
-            panic!("GetDC failed");
+            return Err(anyhow::anyhow!("GetDC failed"));
         }
 
         let result = GetDIBits(
@@ -108,36 +110,18 @@ fn hicon_to_png_bytes(icon: HICON) -> anyhow::Result<Vec<u8>> {
         ReleaseDC(None, hdc);
 
         if result == 0 {
-            panic!("GetDIBits failed");
-        }
-        
-        //
-        // 5. Extract image pixels
-        //
-        let hdc = GetDC(None);
-        let result = GetDIBits(
-            hdc,
-            info.hbmColor,
-            0,
-            height,
-            Some(bgra_data.as_mut_ptr() as *mut _),
-            &mut bi,
-            DIB_RGB_COLORS,
-        );
-        ReleaseDC(None, hdc);
-        if result == 0 {
             return Err(anyhow::anyhow!("GetDIBits failed"));
         }
 
         //
-        // 6. BGRA → RGBA
+        // 5. BGRA → RGBA
         //
         for px in bgra_data.chunks_exact_mut(4) {
             px.swap(0, 2); // B ↔ R
         }
 
         //
-        // 7. Encode PNG using PngEncoder (image 0.25+)
+        // 6. Encode PNG using PngEncoder (image 0.25+)
         //
         let img = RgbaImage::from_raw(width, height, bgra_data)
             .ok_or_else(|| anyhow::anyhow!("Failed to build RGBA image"))?;
@@ -154,7 +138,7 @@ fn hicon_to_png_bytes(icon: HICON) -> anyhow::Result<Vec<u8>> {
         }
 
         //
-        // 8. Cleanup icon bitmaps
+        // 7. Cleanup icon bitmaps
         //
         let _ = DeleteObject(info.hbmColor.into());
         let _ = DeleteObject(info.hbmMask.into());
@@ -165,8 +149,7 @@ fn hicon_to_png_bytes(icon: HICON) -> anyhow::Result<Vec<u8>> {
 
 fn extract_shell_hicon(path: &std::path::Path) -> anyhow::Result<HICON> {
     unsafe {
-        // Ensure COM is initialized (idempotent)
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let _com = ComApartment::initialize()?;
 
         // Convert path to UTF-16
         let wide: Vec<u16> = path
@@ -207,6 +190,29 @@ fn extract_shell_hicon(path: &std::path::Path) -> anyhow::Result<HICON> {
     }
 }
 
+struct ComApartment;
+
+impl ComApartment {
+    fn initialize() -> anyhow::Result<Self> {
+        unsafe {
+            let result = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            if result.is_err() {
+                return Err(anyhow::anyhow!("CoInitializeEx failed: {result:?}"));
+            }
+        }
+
+        Ok(Self)
+    }
+}
+
+impl Drop for ComApartment {
+    fn drop(&mut self) {
+        unsafe {
+            windows::Win32::System::Com::CoUninitialize();
+        }
+    }
+}
+
 
 fn extract_largest_hicon(path: &std::path::Path) -> anyhow::Result<HICON> {
     //
@@ -244,14 +250,18 @@ fn extract_largest_hicon(path: &std::path::Path) -> anyhow::Result<HICON> {
     //
     // Actually load the icons
     //
-    unsafe {
+    let extracted = unsafe {
         ExtractIconExW(
             PCWSTR(wide.as_ptr()),
             0,
             Some(large_icons.as_mut_ptr()),
             Some(small_icons.as_mut_ptr()),
             total,
-        );
+        )
+    };
+
+    if extracted == 0 {
+        anyhow::bail!("ExtractIconExW failed to extract icons");
     }
 
     //
