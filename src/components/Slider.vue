@@ -115,7 +115,7 @@ watch(
     await nextTick();
     slider.value?.update();
   },
-  { deep: true },
+  { deep: true, flush: "post" },
 );
 
 onMounted(async () => {
