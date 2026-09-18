@@ -13,7 +13,9 @@ use sha2::{Sha384, Digest};
 use std::path::Path;
 use std::os::windows::prelude::OsStrExt;
 use windows::Win32::{Graphics::Gdi::{DeleteObject, GetDC, ReleaseDC}}; // Import GetDC and DeleteObject
-use std::io::{Read};
+use std::io::{Read, Write};
+use std::fs::OpenOptions;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_positioner::{WindowExt, Position};
 use tauri::AppHandle;
@@ -26,6 +28,10 @@ use windows::{
             Shell::{ExtractIconExW, SHFILEINFOW, SHGFI_SYSICONINDEX, SHGFI_USEFILEATTRIBUTES,
                 SHGetImageList, SHIL_JUMBO, SHGetFileInfoW},
             WindowsAndMessaging::{HICON, GetIconInfo, ICONINFO}
+        },
+        Storage::FileSystem::{
+            MoveFileExW, ReplaceFileW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+            REPLACE_FILE_FLAGS,
         },
         Graphics::Gdi::{
             GetObjectW, GetDIBits,
@@ -48,6 +54,15 @@ pub struct AppEntry {
     pub exe: String,
     pub publisher: String,
     pub icon: Option<String>, // null in JSON → None in Rust
+}
+
+static SAVE_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn path_to_wide(path: &Path) -> Vec<u16> {
+    path.as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
 }
 
 fn hicon_to_png_bytes(icon: HICON) -> anyhow::Result<Vec<u8>> {
@@ -352,21 +367,67 @@ fn extract_largest_icon_png(path: &std::path::Path) -> anyhow::Result<Vec<u8>> {
 }
 
 pub fn save_apps(json_path: &Path, apps: &[AppEntry]) -> anyhow::Result<()> {
-    // Serialize with pretty formatting (nice for debugging)
     let json = serde_json::to_string_pretty(apps)
         .context("Failed to serialize apps.json")?;
 
-    // Write to a temp file first
-    let tmp_path = json_path.with_extension("json.tmp");
+    let counter = SAVE_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let tmp_path = json_path.with_file_name(format!(
+        "{}.{}.{}.tmp",
+        json_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("apps.json"),
+        std::process::id(),
+        counter,
+    ));
 
-    fs::write(&tmp_path, json)
-        .context("Failed to write temporary apps.json")?;
+    let write_result = (|| -> anyhow::Result<()> {
+        let mut temp_file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp_path)
+            .context("Failed to create temporary apps.json")?;
 
-    // Atomically replace original file
-    fs::rename(&tmp_path, json_path)
-        .context("Failed to replace apps.json")?;
+        temp_file
+            .write_all(json.as_bytes())
+            .context("Failed to write temporary apps.json")?;
+        temp_file
+            .sync_all()
+            .context("Failed to flush temporary apps.json")?;
+        drop(temp_file);
 
-    Ok(())
+        let replacement = path_to_wide(json_path);
+        let temporary = path_to_wide(&tmp_path);
+
+        unsafe {
+            if json_path.exists() {
+                ReplaceFileW(
+                    windows::core::PCWSTR(replacement.as_ptr()),
+                    windows::core::PCWSTR(temporary.as_ptr()),
+                    None,
+                    REPLACE_FILE_FLAGS(0),
+                    None,
+                    None,
+                )
+                .context("Failed to replace apps.json")?;
+            } else {
+                MoveFileExW(
+                    windows::core::PCWSTR(temporary.as_ptr()),
+                    windows::core::PCWSTR(replacement.as_ptr()),
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+                )
+                .context("Failed to move new apps.json into place")?;
+            }
+        }
+
+        Ok(())
+    })();
+
+    if write_result.is_err() {
+        let _ = fs::remove_file(&tmp_path);
+    }
+
+    write_result
 }
 
 /// Load the working `apps.json` into a Vec<AppEntry>.

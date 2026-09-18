@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from "vue";
+import { ref, onMounted, nextTick, watch } from "vue";
 import { useKeenSlider } from "keen-slider/vue.es";
 import "keen-slider/keen-slider.min.css";
 import { useFetchStore } from "../stores/fetch";
@@ -109,6 +109,15 @@ const [container, slider] = useKeenSlider(
   [wheelControls],
 );
 
+watch(
+  () => fetchStore.appList,
+  async () => {
+    await nextTick();
+    slider.value?.update();
+  },
+  { deep: true },
+);
+
 onMounted(async () => {
   await fetchStore.getApps();
   await fetchStore.refreshApps();
@@ -121,7 +130,7 @@ onMounted(async () => {
     <div ref="container" class="keen-slider">
       <div
         v-for="(app, index) in fetchStore.appList"
-        :key="app.id"
+        :key="app.id ?? app.exe"
         class="keen-slider__slide slide-items"
         @mouseenter="onHover(app, index)"
         @mouseleave="onLeave()"
