@@ -99,21 +99,24 @@ const wheelControls = (slider) => {
   });
 };
 
-const [container, slider] = useKeenSlider(
-  {
-    loop: true,
-    mode: "free-snap",
-    rubberband: true,
-    slides: { perView: 8, spacing: 32 },
-  },
-  [wheelControls],
-);
+const sliderOptions = {
+  loop: true,
+  mode: "free-snap",
+  rubberband: true,
+  slides: { perView: 8, spacing: 32 },
+};
 
+const [container, slider] = useKeenSlider(sliderOptions, [wheelControls]);
+
+// Passing options (instead of a bare update()) fires "optionsChanged", which makes
+// keen-slider's renderer re-read the slide elements in their new DOM order.
+// A bare update() keeps rendering against the stale element list, so reordered
+// apps stay in their old positions.
 watch(
   () => fetchStore.appList,
   async () => {
     await nextTick();
-    slider.value?.update();
+    slider.value?.update(sliderOptions);
   },
   { deep: true, flush: "post" },
 );
@@ -121,7 +124,6 @@ watch(
 onMounted(async () => {
   await fetchStore.getApps();
   await fetchStore.refreshApps();
-  slider.value?.update();
 });
 </script>
 
