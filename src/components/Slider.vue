@@ -11,7 +11,7 @@ const fetchStore = useFetchStore();
 
 // const loading = ref(true);
 
-const emit = defineEmits(["hover", "leave"]);
+const emit = defineEmits(["hover", "leave", "error"]);
 
 // const hoveredApp = ref(null);
 const hoveredIndex = ref(null);
@@ -54,7 +54,7 @@ function onLeave() {
   emit("leave");
 }
 
-function launchApp(exe, index) {
+function launchApp(app, index) {
   pressedIndex.value = index;
 
   // visual feedback first
@@ -64,7 +64,11 @@ function launchApp(exe, index) {
 
   // launch slightly after press starts
   setTimeout(() => {
-    invoke("launch_app", { exe });
+    invoke("launch_app", { exe: app.exe }).catch((err) => {
+      // user dismissed the UAC prompt
+      if (err === "cancelled") return;
+      emit("error", `Couldn't launch ${app.name}: ${err}`);
+    });
   }, 40);
 }
 const wheelControls = (slider) => {
@@ -136,10 +140,10 @@ onMounted(async () => {
         class="keen-slider__slide slide-items"
         @mouseenter="onHover(app, index)"
         @mouseleave="onLeave()"
-        @click="launchApp(app.exe, index)"
+        @click="launchApp(app, index)"
       >
         <img
-          :src="convertFileSrc(app.icon)"
+          :src="app.icon ? convertFileSrc(app.icon) : '/tauri.svg'"
           v-bind:alt="app.name"
           width="64"
           height="64"

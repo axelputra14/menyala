@@ -31,6 +31,14 @@ function showTooltip(text: string) {
 function hideTooltip() {
   tooltipVisible.value = false;
 }
+
+let errorTimer: ReturnType<typeof setTimeout> | undefined;
+
+function showError(text: string) {
+  clearTimeout(errorTimer);
+  showTooltip(text);
+  errorTimer = setTimeout(hideTooltip, 3000);
+}
 </script>
 
 <template>
@@ -39,7 +47,7 @@ function hideTooltip() {
       <Tooltip :text="tooltipText" :visible="tooltipVisible" />
     </div>
 
-    <Slider @hover="showTooltip" @leave="hideTooltip" />
+    <Slider @hover="showTooltip" @leave="hideTooltip" @error="showError" />
 
     <AppEditor :visible="editorVisible" @close="editorVisible = false" />
   </main>

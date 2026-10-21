@@ -7,13 +7,12 @@ use tauri::{
 use tauri::{Manager, Emitter};
 use serde::{Deserialize, Serialize};
 use std::{fs};
-use std::fs::File;
 use std::path::PathBuf;
 use sha2::{Sha384, Digest};
 use std::path::Path;
 use std::os::windows::prelude::OsStrExt;
 use windows::Win32::{Graphics::Gdi::{DeleteObject, GetDC, ReleaseDC}}; // Import GetDC and DeleteObject
-use std::io::{Read, Write};
+use std::io::Write;
 use std::fs::OpenOptions;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tauri_plugin_opener::OpenerExt;
@@ -22,12 +21,14 @@ use tauri::AppHandle;
 use anyhow::{Result, Context};
 
 use windows::{
-    core::{PCWSTR},
+    core::{HRESULT, PCWSTR},
     Win32::{
+        Foundation::ERROR_CANCELLED,
         UI::{
             Shell::{ExtractIconExW, SHFILEINFOW, SHGFI_SYSICONINDEX, SHGFI_USEFILEATTRIBUTES,
-                SHGetImageList, SHIL_JUMBO, SHGetFileInfoW},
-            WindowsAndMessaging::{HICON, GetIconInfo, ICONINFO}
+                SHGetImageList, SHIL_JUMBO, SHGetFileInfoW,
+                ShellExecuteExW, SHELLEXECUTEINFOW, SEE_MASK_NOASYNC, SEE_MASK_FLAG_NO_UI},
+            WindowsAndMessaging::{HICON, GetIconInfo, ICONINFO, SW_SHOWNORMAL}
         },
         Storage::FileSystem::{
             MoveFileExW, ReplaceFileW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
@@ -453,27 +454,33 @@ fn refresh_apps_impl(app: &tauri::AppHandle) -> Result<Vec<AppEntry>, String>{
 
     let mut changed = false;
 
+    // Always re-resolve the icon: the cache key is cheap to compute and changes
+    // whenever the exe path or the exe itself changes, so stale icons get replaced.
     for entry in apps.iter_mut() {
-        // Skip if icon already recorded
-        if entry.icon.is_some() {
-            continue;
-        }
-
         let exe_path = std::path::Path::new(&entry.exe);
         if !exe_path.exists() {
+            if entry.icon.take().is_some() {
+                changed = true;
+            }
             continue;
         }
 
         match extract_icon_cached(exe_path, &icocache_dir) {
-            Ok(relative_icon_path) => {
-                entry.icon = Some(relative_icon_path.to_string_lossy().to_string());
-                changed = true;
+            Ok(icon_path) => {
+                let icon = Some(icon_path.to_string_lossy().to_string());
+                if entry.icon != icon {
+                    entry.icon = icon;
+                    changed = true;
+                }
             }
             Err(err) => {
                 eprintln!(
                     "Failed to extract icon for {}: {}",
                     entry.exe, err
                 );
+                if entry.icon.take().is_some() {
+                    changed = true;
+                }
             }
         }
     }
@@ -487,25 +494,38 @@ fn refresh_apps_impl(app: &tauri::AppHandle) -> Result<Vec<AppEntry>, String>{
 }
 
 #[tauri::command]
-fn refresh_apps(app: tauri::AppHandle) -> Result<Vec<AppEntry>, String> {
-    refresh_apps_impl(&app).map_err(|e| e.to_string())
+async fn refresh_apps(app: tauri::AppHandle) -> Result<Vec<AppEntry>, String> {
+    // Icon extraction is blocking Win32 work; keep it off the main thread
+    tauri::async_runtime::spawn_blocking(move || refresh_apps_impl(&app))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
-pub fn hash_app_path(path: &Path) -> String {
+/// Cache key for an exe's icon: path + size + modified time.
+/// Cheap to compute (metadata only) and changes whenever the exe is replaced or updated.
+pub fn icon_cache_key(path: &Path) -> anyhow::Result<String> {
+    let metadata = fs::metadata(path)?;
+    let modified = metadata
+        .modified()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+
     // Normalize for consistency (lowercase + absolute path)
     let normalized = path
         .canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf()) // fallback if file doesn't exist
+        .unwrap_or_else(|_| path.to_path_buf())
         .to_string_lossy()
         .to_lowercase();
 
     // Compute SHA-384 digest
     let mut hasher = Sha384::new();
     hasher.update(normalized.as_bytes());
-    let digest = hasher.finalize();
+    hasher.update(metadata.len().to_le_bytes());
+    hasher.update(modified.to_le_bytes());
 
     // Convert to hex string
-    hex::encode(digest)
+    Ok(hex::encode(hasher.finalize()))
 }
 
 pub fn ensure_icocache_dir(app: &AppHandle) -> Result<PathBuf> {
@@ -564,28 +584,12 @@ fn ensure_apps_json(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
 }
 
 
-fn sha384_file(path: &Path) -> anyhow::Result<String> {
-    let mut file = File::open(path)?;
-    let mut hasher = Sha384::new();
-    let mut buf = [0u8; 8192];
-
-    loop {
-        let n = file.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-
-    Ok(format!("{:x}", hasher.finalize()))
-}
-
 pub fn extract_icon_cached(
     exe_path: &Path,
     cache_dir: &Path,
 ) -> anyhow::Result<PathBuf> {
-    // 1. Hash the binary
-    let hash = sha384_file(exe_path)?;
+    // 1. Compute the cache key
+    let hash = icon_cache_key(exe_path)?;
     let file_name = format!("{hash}.png");
 
     let out_path = cache_dir.join(file_name);
@@ -607,19 +611,39 @@ pub fn extract_icon_cached(
     Ok(out_path)
 }
 
-#[tauri::command]
-fn launch_app(exe: &str) -> Result<(), String> {
-    use std::{path::Path, process::Command};
+/// Launch through the Windows shell (like double-clicking in Explorer):
+/// handles UAC elevation, .lnk shortcuts and .bat/.cmd scripts.
+fn shell_launch(exe: &str) -> Result<(), String> {
+    let _com = ComApartment::initialize().map_err(|e| e.to_string())?;
 
     let exe_path = Path::new(exe);
+    let file = path_to_wide(exe_path);
+    let dir = path_to_wide(exe_path.parent().unwrap_or_else(|| Path::new(".")));
 
-    Command::new(exe_path)
-        .current_dir(
-            exe_path.parent().unwrap_or_else(|| Path::new("."))
-        )
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+    let mut info = SHELLEXECUTEINFOW {
+        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI,
+        lpFile: PCWSTR(file.as_ptr()),
+        lpDirectory: PCWSTR(dir.as_ptr()),
+        nShow: SW_SHOWNORMAL.0,
+        ..Default::default()
+    };
+
+    unsafe { ShellExecuteExW(&mut info) }.map_err(|e| {
+        // User dismissed the UAC prompt; not an error worth showing
+        if e.code() == HRESULT::from_win32(ERROR_CANCELLED.0) {
+            "cancelled".to_string()
+        } else {
+            e.message().to_string()
+        }
+    })
+}
+
+#[tauri::command]
+async fn launch_app(exe: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || shell_launch(&exe))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

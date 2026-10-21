@@ -90,15 +90,21 @@ async function saveChanges() {
 async function resetPos() {
   await fetchStore.refreshApps();
 }
+
+// every way of dismissing the editor must also shrink/reposition the window
+function closeEditor() {
+  emit("close");
+  resetPos();
+}
 </script>
 
 <template>
   <Transition name="fade">
-    <div v-if="visible" class="editor-overlay" @click.self="emit('close')">
+    <div v-if="visible" class="editor-overlay" @click.self="closeEditor">
       <div class="editor-modal">
         <div class="editor-header">
           <h2>Manage Applications</h2>
-          <button class="btn-close" @click="(emit('close'), resetPos())">
+          <button class="btn-close" @click="closeEditor">
             &times;
           </button>
         </div>
@@ -184,7 +190,7 @@ async function resetPos() {
             + Add Application
           </button>
           <div class="footer-right">
-            <button class="btn-ghost" @click="(emit('close'), resetPos())">
+            <button class="btn-ghost" @click="closeEditor">
               Cancel
             </button>
             <button
