@@ -646,16 +646,13 @@ async fn launch_app(exe: String) -> Result<(), String> {
         .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
-fn return_position(app: &tauri::AppHandle) -> () {
-
+fn return_position(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
-        for _ in 1..=2{
-            let _ = win.move_window(Position::BottomCenter);
-            let _ = win.set_size(tauri::Size::Physical(
-                tauri::PhysicalSize::new(650, 210)
-            ));
-        }
+        // Resize first so BottomCenter is computed from the dock size
+        let _ = win.set_size(tauri::Size::Physical(
+            tauri::PhysicalSize::new(650, 210)
+        ));
+        let _ = win.move_window(Position::BottomCenter);
     }
 }
 
@@ -714,9 +711,17 @@ pub fn run() {
                     let _ = app.opener().open_path(config_dir, None::<&str>);
                 }
                 "refresh" => {
-                    
-                    return_position(&app);
-                    refresh_apps_impl(&app).unwrap();
+                    // Off the main thread like the refresh_apps command; push the result to the frontend
+                    let app = app.clone();
+                    tauri::async_runtime::spawn_blocking(move || match refresh_apps_impl(&app) {
+                        Ok(apps) => {
+                            let _ = app.emit("apps-updated", apps);
+                        }
+                        Err(err) => {
+                            eprintln!("Failed to refresh apps: {err}");
+                            let _ = app.emit("apps-refresh-failed", err);
+                        }
+                    });
                 }
                 "edit" => {
                         //println!("edit menu item was clicked");
