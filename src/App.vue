@@ -66,7 +66,13 @@ function showError(text: string) {
       <Tooltip :text="tooltipText" :visible="tooltipVisible" />
     </div>
 
-    <Slider @hover="showTooltip" @leave="hideTooltip" @error="showError" />
+    <!-- visibility, not v-if/v-show: the slider keeps its layout for when the editor closes -->
+    <Slider
+      :style="{ visibility: editorVisible ? 'hidden' : 'visible' }"
+      @hover="showTooltip"
+      @leave="hideTooltip"
+      @error="showError"
+    />
 
     <AppEditor :visible="editorVisible" @close="editorVisible = false" />
   </main>
