@@ -25,8 +25,7 @@
         "maximizable": false,
         "minimizable": true,
         "closable": true,
-        "focus": false,
-        "alwaysOnBottom": true
+        "focus": false
       }
     ],
     "security": {

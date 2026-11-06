@@ -21,14 +21,20 @@ use tauri::AppHandle;
 use anyhow::{Result, Context};
 
 use windows::{
-    core::{HRESULT, PCWSTR},
+    core::{w, HRESULT, PCWSTR},
     Win32::{
-        Foundation::ERROR_CANCELLED,
+        Foundation::{ERROR_CANCELLED, HWND},
         UI::{
             Shell::{ExtractIconExW, SHFILEINFOW, SHGFI_SYSICONINDEX, SHGFI_USEFILEATTRIBUTES,
                 SHGetImageList, SHIL_JUMBO, SHGetFileInfoW,
                 ShellExecuteExW, SHELLEXECUTEINFOW, SEE_MASK_NOASYNC, SEE_MASK_FLAG_NO_UI},
-            WindowsAndMessaging::{HICON, GetIconInfo, ICONINFO, SW_SHOWNORMAL}
+            WindowsAndMessaging::{
+                HICON, GetIconInfo, ICONINFO, SW_SHOWNORMAL,
+                FindWindowW, GetWindow, GetWindowLongW, SetWindowLongPtrW, SetWindowPos,
+                GWLP_HWNDPARENT, GWL_EXSTYLE, GW_HWNDPREV, GW_OWNER,
+                HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+                WS_EX_TOPMOST,
+            }
         },
         Storage::FileSystem::{
             MoveFileExW, ReplaceFileW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
@@ -656,6 +662,49 @@ fn return_position(app: &tauri::AppHandle) {
     }
 }
 
+/// Moves the dock directly above the desktop, wherever the desktop is in the stack.
+/// Show Desktop raises Progman and restoring lowers it, but the dock doesn't follow it down.
+unsafe fn place_above_desktop(dock: HWND, progman: HWND) {
+    unsafe {
+        let above_desktop = GetWindow(progman, GW_HWNDPREV).ok();
+        if above_desktop == Some(dock) {
+            return;
+        }
+        // Inserting behind a topmost window could make the dock topmost too
+        let insert_after = above_desktop
+            .filter(|window| GetWindowLongW(*window, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST.0 == 0)
+            .unwrap_or(HWND_TOP);
+        let _ = SetWindowPos(dock, Some(insert_after), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+}
+
+/// Makes the dock an owned window of the desktop (Progman). Windows keeps owned windows
+/// above their owner, so the dock survives desktop clicks while normal windows still cover it.
+fn attach_to_desktop(dock: HWND) -> bool {
+    unsafe {
+        let Ok(progman) = FindWindowW(w!("Progman"), PCWSTR::null()) else {
+            return false;
+        };
+        if !GetWindow(dock, GW_OWNER).is_ok_and(|owner| owner == progman) {
+            SetWindowLongPtrW(dock, GWLP_HWNDPARENT, progman.0 as isize);
+        }
+        place_above_desktop(dock, progman);
+        GetWindow(dock, GW_OWNER).is_ok_and(|owner| owner == progman)
+    }
+}
+
+/// Pins the dock to the desktop, then keeps it there: re-attaches when Explorer restarts and
+/// replaces Progman, and sinks the dock again after Show Desktop is undone.
+fn pin_to_desktop(dock: isize) {
+    if !attach_to_desktop(HWND(dock as *mut _)) {
+        eprintln!("Failed to attach dock to desktop");
+    }
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        attach_to_desktop(HWND(dock as *mut _));
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -676,6 +725,7 @@ pub fn run() {
 
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.move_window(Position::BottomCenter);
+                pin_to_desktop(win.hwnd()?.0 as isize);
             }
 
             let _tray = TrayIconBuilder::new()
