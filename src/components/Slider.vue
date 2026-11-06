@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, nextTick, watch } from "vue";
+import { onMounted, onUnmounted, nextTick, watch } from "vue";
 import { useKeenSlider } from "keen-slider/vue.es";
 import "keen-slider/keen-slider.min.css";
 import { useFetchStore } from "../stores/fetch";
@@ -13,56 +13,94 @@ const fetchStore = useFetchStore();
 
 const emit = defineEmits(["hover", "leave", "error"]);
 
-// const hoveredApp = ref(null);
-const hoveredIndex = ref(null);
-const pressedIndex = ref(null);
+const SLIDE_SPACING = 32;
+const MAX_SCALE = 1.5;
+const MAX_LIFT = 14; // px
+const REACH = 2.5; // how far the lift spreads, in icon widths including spacing
+const EASE = 0.2; // share of the remaining distance covered per frame on enter/leave
 
-function iconStyle(index) {
-  let scale = 1;
-  let translateY = 0;
-  if (hoveredIndex.value === null) return {};
+let pointerX = 0;
+let pointerInside = false;
+let strength = 0; // 0 = at rest, 1 = fully lifted
+let nearestIndex = null;
+let frame = null;
 
-  const distance = Math.abs(index - hoveredIndex.value);
-
-  if (distance === 0) {
-    scale = 1.5;
-    translateY = -14;
-  } else if (distance === 1) {
-    scale = 1.25;
-    translateY = -8;
-  } else if (distance === 2) {
-    scale = 1.1;
-    translateY = -4;
-  }
-
-  if (pressedIndex.value === index) {
-    translateY -= 6;
-  }
-
-  return {
-    transform: `translateY(${translateY}px) scale(${scale})`,
-    zIndex: 10 - distance,
-  };
-}
-function onHover(app, index) {
-  hoveredIndex.value = index;
-  emit("hover", app.name);
+function slideCenter(slide) {
+  const rect = slide.getBoundingClientRect();
+  return rect.left + rect.width / 2;
 }
 
-function onLeave() {
-  hoveredIndex.value = null;
+function updateTooltip(centers) {
+  let nearest = null;
+  centers.forEach((center, index) => {
+    if (
+      nearest === null ||
+      Math.abs(center - pointerX) < Math.abs(centers[nearest] - pointerX)
+    ) {
+      nearest = index;
+    }
+  });
+
+  const app = fetchStore.appList[nearest];
+  if (nearest !== nearestIndex && app) {
+    nearestIndex = nearest;
+    emit("hover", app.name);
+  }
+}
+
+// Runs every frame while hovered, so the lift also follows icons scrolling under a still cursor
+function renderLift() {
+  frame = null;
+  const slides = slider.value?.slides ?? [];
+
+  strength += ((pointerInside ? 1 : 0) - strength) * EASE;
+  if (!pointerInside && strength < 0.01) strength = 0;
+
+  if (slides.length > 0) {
+    const centers = slides.map(slideCenter);
+    const reach =
+      REACH * (slides[0].getBoundingClientRect().width + SLIDE_SPACING);
+
+    slides.forEach((slide, index) => {
+      const img = slide.querySelector("img");
+      if (!img) return;
+
+      const distance = Math.abs(centers[index] - pointerX);
+      const lift =
+        distance < reach ? (1 + Math.cos((Math.PI * distance) / reach)) / 2 : 0;
+      const amount = lift * strength;
+
+      img.style.transform = amount
+        ? `translateY(${-MAX_LIFT * amount}px) scale(${1 + (MAX_SCALE - 1) * amount})`
+        : "";
+      img.style.zIndex = amount ? Math.round(lift * 10) : "";
+    });
+
+    if (pointerInside) updateTooltip(centers);
+  }
+
+  if (pointerInside || strength > 0) requestLift();
+}
+
+function requestLift() {
+  if (frame === null) frame = requestAnimationFrame(renderLift);
+}
+
+function onPointerMove(event) {
+  pointerX = event.clientX;
+  pointerInside = true;
+  requestLift();
+}
+
+function onPointerLeave() {
+  pointerInside = false;
+  nearestIndex = null;
   emit("leave");
+  requestLift();
 }
 
-function launchApp(app, index) {
-  pressedIndex.value = index;
-
-  // visual feedback first
-  setTimeout(() => {
-    pressedIndex.value = null;
-  }, 120);
-
-  // launch slightly after press starts
+function launchApp(app) {
+  // launch slightly after the click
   setTimeout(() => {
     invoke("launch_app", { exe: app.exe }).catch((err) => {
       // user dismissed the UAC prompt
@@ -107,7 +145,7 @@ const sliderOptions = {
   loop: true,
   mode: "free-snap",
   rubberband: true,
-  slides: { perView: 8, spacing: 32 },
+  slides: { perView: 8, spacing: SLIDE_SPACING },
 };
 
 const [container, slider] = useKeenSlider(sliderOptions, [wheelControls]);
@@ -129,25 +167,32 @@ onMounted(async () => {
   await fetchStore.getApps();
   await fetchStore.refreshApps();
 });
+
+onUnmounted(() => {
+  if (frame !== null) cancelAnimationFrame(frame);
+});
 </script>
 
 <template>
-  <div class="slider-wrapper">
+  <div
+    class="slider-wrapper"
+    @pointerenter="onPointerMove"
+    @pointermove="onPointerMove"
+    @pointerleave="onPointerLeave"
+  >
+    <div class="hover-zone"></div>
     <div ref="container" class="keen-slider">
       <div
-        v-for="(app, index) in fetchStore.appList"
+        v-for="app in fetchStore.appList"
         :key="app.id ?? app.exe"
         class="keen-slider__slide slide-items"
-        @mouseenter="onHover(app, index)"
-        @mouseleave="onLeave()"
-        @click="launchApp(app, index)"
+        @click="launchApp(app)"
       >
         <img
           :src="app.icon ? convertFileSrc(app.icon) : '/tauri.svg'"
           v-bind:alt="app.name"
           width="64"
           height="64"
-          :style="iconStyle(index)"
         />
       </div>
     </div>
@@ -211,6 +256,15 @@ body {
   border-radius: 1.5rem;
 }
 
+/* keeps the dock hovered while the cursor is between lifted icons, above the wrapper */
+.hover-zone {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  height: 30px;
+}
+
 .keen-slider {
   overflow: visible !important; /* no mask anymore */
 }
@@ -240,7 +294,6 @@ body {
 
 .slide-items svg,
 .slide-items img {
-  transition: transform 160ms ease-out;
   transform-origin: 50% 100%;
   will-change: transform;
 }
