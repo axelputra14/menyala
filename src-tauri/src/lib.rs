@@ -7,25 +7,38 @@ use tauri::{
 use tauri::{Manager, Emitter};
 use serde::{Deserialize, Serialize};
 use std::{fs};
-use std::fs::File;
 use std::path::PathBuf;
 use sha2::{Sha384, Digest};
 use std::path::Path;
 use std::os::windows::prelude::OsStrExt;
 use windows::Win32::{Graphics::Gdi::{DeleteObject, GetDC, ReleaseDC}}; // Import GetDC and DeleteObject
-use std::io::{Read};
+use std::io::Write;
+use std::fs::OpenOptions;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_positioner::{WindowExt, Position};
 use tauri::AppHandle;
 use anyhow::{Result, Context};
 
 use windows::{
-    core::{PCWSTR},
+    core::{w, HRESULT, PCWSTR},
     Win32::{
+        Foundation::{ERROR_CANCELLED, HWND},
         UI::{
             Shell::{ExtractIconExW, SHFILEINFOW, SHGFI_SYSICONINDEX, SHGFI_USEFILEATTRIBUTES,
-                SHGetImageList, SHIL_JUMBO, SHGetFileInfoW},
-            WindowsAndMessaging::{HICON, GetIconInfo, ICONINFO}
+                SHGetImageList, SHIL_JUMBO, SHGetFileInfoW,
+                ShellExecuteExW, SHELLEXECUTEINFOW, SEE_MASK_NOASYNC, SEE_MASK_FLAG_NO_UI},
+            WindowsAndMessaging::{
+                HICON, GetIconInfo, ICONINFO, SW_SHOWNORMAL,
+                FindWindowW, GetWindow, GetWindowLongW, SetWindowLongPtrW, SetWindowPos,
+                GWLP_HWNDPARENT, GWL_EXSTYLE, GW_HWNDPREV, GW_OWNER,
+                HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+                WS_EX_TOPMOST,
+            }
+        },
+        Storage::FileSystem::{
+            MoveFileExW, ReplaceFileW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+            REPLACE_FILE_FLAGS,
         },
         Graphics::Gdi::{
             GetObjectW, GetDIBits,
@@ -42,10 +55,21 @@ use image::codecs::png::PngEncoder;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppEntry {
+    #[serde(default)]
+    pub id: Option<String>,
     pub name: String,
     pub exe: String,
     pub publisher: String,
     pub icon: Option<String>, // null in JSON → None in Rust
+}
+
+static SAVE_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn path_to_wide(path: &Path) -> Vec<u16> {
+    path.as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
 }
 
 fn hicon_to_png_bytes(icon: HICON) -> anyhow::Result<Vec<u8>> {
@@ -92,7 +116,7 @@ fn hicon_to_png_bytes(icon: HICON) -> anyhow::Result<Vec<u8>> {
 
         let hdc = GetDC(None);
         if hdc.0.is_null() {
-            panic!("GetDC failed");
+            return Err(anyhow::anyhow!("GetDC failed"));
         }
 
         let result = GetDIBits(
@@ -108,36 +132,18 @@ fn hicon_to_png_bytes(icon: HICON) -> anyhow::Result<Vec<u8>> {
         ReleaseDC(None, hdc);
 
         if result == 0 {
-            panic!("GetDIBits failed");
-        }
-        
-        //
-        // 5. Extract image pixels
-        //
-        let hdc = GetDC(None);
-        let result = GetDIBits(
-            hdc,
-            info.hbmColor,
-            0,
-            height,
-            Some(bgra_data.as_mut_ptr() as *mut _),
-            &mut bi,
-            DIB_RGB_COLORS,
-        );
-        ReleaseDC(None, hdc);
-        if result == 0 {
             return Err(anyhow::anyhow!("GetDIBits failed"));
         }
 
         //
-        // 6. BGRA → RGBA
+        // 5. BGRA → RGBA
         //
         for px in bgra_data.chunks_exact_mut(4) {
             px.swap(0, 2); // B ↔ R
         }
 
         //
-        // 7. Encode PNG using PngEncoder (image 0.25+)
+        // 6. Encode PNG using PngEncoder (image 0.25+)
         //
         let img = RgbaImage::from_raw(width, height, bgra_data)
             .ok_or_else(|| anyhow::anyhow!("Failed to build RGBA image"))?;
@@ -154,7 +160,7 @@ fn hicon_to_png_bytes(icon: HICON) -> anyhow::Result<Vec<u8>> {
         }
 
         //
-        // 8. Cleanup icon bitmaps
+        // 7. Cleanup icon bitmaps
         //
         let _ = DeleteObject(info.hbmColor.into());
         let _ = DeleteObject(info.hbmMask.into());
@@ -165,8 +171,7 @@ fn hicon_to_png_bytes(icon: HICON) -> anyhow::Result<Vec<u8>> {
 
 fn extract_shell_hicon(path: &std::path::Path) -> anyhow::Result<HICON> {
     unsafe {
-        // Ensure COM is initialized (idempotent)
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let _com = ComApartment::initialize()?;
 
         // Convert path to UTF-16
         let wide: Vec<u16> = path
@@ -207,6 +212,29 @@ fn extract_shell_hicon(path: &std::path::Path) -> anyhow::Result<HICON> {
     }
 }
 
+struct ComApartment;
+
+impl ComApartment {
+    fn initialize() -> anyhow::Result<Self> {
+        unsafe {
+            let result = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            if result.is_err() {
+                return Err(anyhow::anyhow!("CoInitializeEx failed: {result:?}"));
+            }
+        }
+
+        Ok(Self)
+    }
+}
+
+impl Drop for ComApartment {
+    fn drop(&mut self) {
+        unsafe {
+            windows::Win32::System::Com::CoUninitialize();
+        }
+    }
+}
+
 
 fn extract_largest_hicon(path: &std::path::Path) -> anyhow::Result<HICON> {
     //
@@ -244,14 +272,18 @@ fn extract_largest_hicon(path: &std::path::Path) -> anyhow::Result<HICON> {
     //
     // Actually load the icons
     //
-    unsafe {
+    let extracted = unsafe {
         ExtractIconExW(
             PCWSTR(wide.as_ptr()),
             0,
             Some(large_icons.as_mut_ptr()),
             Some(small_icons.as_mut_ptr()),
             total,
-        );
+        )
+    };
+
+    if extracted == 0 {
+        anyhow::bail!("ExtractIconExW failed to extract icons");
     }
 
     //
@@ -342,21 +374,67 @@ fn extract_largest_icon_png(path: &std::path::Path) -> anyhow::Result<Vec<u8>> {
 }
 
 pub fn save_apps(json_path: &Path, apps: &[AppEntry]) -> anyhow::Result<()> {
-    // Serialize with pretty formatting (nice for debugging)
     let json = serde_json::to_string_pretty(apps)
         .context("Failed to serialize apps.json")?;
 
-    // Write to a temp file first
-    let tmp_path = json_path.with_extension("json.tmp");
+    let counter = SAVE_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let tmp_path = json_path.with_file_name(format!(
+        "{}.{}.{}.tmp",
+        json_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("apps.json"),
+        std::process::id(),
+        counter,
+    ));
 
-    fs::write(&tmp_path, json)
-        .context("Failed to write temporary apps.json")?;
+    let write_result = (|| -> anyhow::Result<()> {
+        let mut temp_file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp_path)
+            .context("Failed to create temporary apps.json")?;
 
-    // Atomically replace original file
-    fs::rename(&tmp_path, json_path)
-        .context("Failed to replace apps.json")?;
+        temp_file
+            .write_all(json.as_bytes())
+            .context("Failed to write temporary apps.json")?;
+        temp_file
+            .sync_all()
+            .context("Failed to flush temporary apps.json")?;
+        drop(temp_file);
 
-    Ok(())
+        let replacement = path_to_wide(json_path);
+        let temporary = path_to_wide(&tmp_path);
+
+        unsafe {
+            if json_path.exists() {
+                ReplaceFileW(
+                    windows::core::PCWSTR(replacement.as_ptr()),
+                    windows::core::PCWSTR(temporary.as_ptr()),
+                    None,
+                    REPLACE_FILE_FLAGS(0),
+                    None,
+                    None,
+                )
+                .context("Failed to replace apps.json")?;
+            } else {
+                MoveFileExW(
+                    windows::core::PCWSTR(temporary.as_ptr()),
+                    windows::core::PCWSTR(replacement.as_ptr()),
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+                )
+                .context("Failed to move new apps.json into place")?;
+            }
+        }
+
+        Ok(())
+    })();
+
+    if write_result.is_err() {
+        let _ = fs::remove_file(&tmp_path);
+    }
+
+    write_result
 }
 
 /// Load the working `apps.json` into a Vec<AppEntry>.
@@ -382,27 +460,33 @@ fn refresh_apps_impl(app: &tauri::AppHandle) -> Result<Vec<AppEntry>, String>{
 
     let mut changed = false;
 
+    // Always re-resolve the icon: the cache key is cheap to compute and changes
+    // whenever the exe path or the exe itself changes, so stale icons get replaced.
     for entry in apps.iter_mut() {
-        // Skip if icon already recorded
-        if entry.icon.is_some() {
-            continue;
-        }
-
         let exe_path = std::path::Path::new(&entry.exe);
         if !exe_path.exists() {
+            if entry.icon.take().is_some() {
+                changed = true;
+            }
             continue;
         }
 
         match extract_icon_cached(exe_path, &icocache_dir) {
-            Ok(relative_icon_path) => {
-                entry.icon = Some(relative_icon_path.to_string_lossy().to_string());
-                changed = true;
+            Ok(icon_path) => {
+                let icon = Some(icon_path.to_string_lossy().to_string());
+                if entry.icon != icon {
+                    entry.icon = icon;
+                    changed = true;
+                }
             }
             Err(err) => {
                 eprintln!(
                     "Failed to extract icon for {}: {}",
                     entry.exe, err
                 );
+                if entry.icon.take().is_some() {
+                    changed = true;
+                }
             }
         }
     }
@@ -416,25 +500,38 @@ fn refresh_apps_impl(app: &tauri::AppHandle) -> Result<Vec<AppEntry>, String>{
 }
 
 #[tauri::command]
-fn refresh_apps(app: tauri::AppHandle) -> Result<Vec<AppEntry>, String> {
-    refresh_apps_impl(&app).map_err(|e| e.to_string())
+async fn refresh_apps(app: tauri::AppHandle) -> Result<Vec<AppEntry>, String> {
+    // Icon extraction is blocking Win32 work; keep it off the main thread
+    tauri::async_runtime::spawn_blocking(move || refresh_apps_impl(&app))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
-pub fn hash_app_path(path: &Path) -> String {
+/// Cache key for an exe's icon: path + size + modified time.
+/// Cheap to compute (metadata only) and changes whenever the exe is replaced or updated.
+pub fn icon_cache_key(path: &Path) -> anyhow::Result<String> {
+    let metadata = fs::metadata(path)?;
+    let modified = metadata
+        .modified()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+
     // Normalize for consistency (lowercase + absolute path)
     let normalized = path
         .canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf()) // fallback if file doesn't exist
+        .unwrap_or_else(|_| path.to_path_buf())
         .to_string_lossy()
         .to_lowercase();
 
     // Compute SHA-384 digest
     let mut hasher = Sha384::new();
     hasher.update(normalized.as_bytes());
-    let digest = hasher.finalize();
+    hasher.update(metadata.len().to_le_bytes());
+    hasher.update(modified.to_le_bytes());
 
     // Convert to hex string
-    hex::encode(digest)
+    Ok(hex::encode(hasher.finalize()))
 }
 
 pub fn ensure_icocache_dir(app: &AppHandle) -> Result<PathBuf> {
@@ -493,28 +590,12 @@ fn ensure_apps_json(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
 }
 
 
-fn sha384_file(path: &Path) -> anyhow::Result<String> {
-    let mut file = File::open(path)?;
-    let mut hasher = Sha384::new();
-    let mut buf = [0u8; 8192];
-
-    loop {
-        let n = file.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-
-    Ok(format!("{:x}", hasher.finalize()))
-}
-
 pub fn extract_icon_cached(
     exe_path: &Path,
     cache_dir: &Path,
 ) -> anyhow::Result<PathBuf> {
-    // 1. Hash the binary
-    let hash = sha384_file(exe_path)?;
+    // 1. Compute the cache key
+    let hash = icon_cache_key(exe_path)?;
     let file_name = format!("{hash}.png");
 
     let out_path = cache_dir.join(file_name);
@@ -536,32 +617,92 @@ pub fn extract_icon_cached(
     Ok(out_path)
 }
 
-#[tauri::command]
-fn launch_app(exe: &str) -> Result<(), String> {
-    use std::{path::Path, process::Command};
+/// Launch through the Windows shell (like double-clicking in Explorer):
+/// handles UAC elevation, .lnk shortcuts and .bat/.cmd scripts.
+fn shell_launch(exe: &str) -> Result<(), String> {
+    let _com = ComApartment::initialize().map_err(|e| e.to_string())?;
 
     let exe_path = Path::new(exe);
+    let file = path_to_wide(exe_path);
+    let dir = path_to_wide(exe_path.parent().unwrap_or_else(|| Path::new(".")));
 
-    Command::new(exe_path)
-        .current_dir(
-            exe_path.parent().unwrap_or_else(|| Path::new("."))
-        )
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+    let mut info = SHELLEXECUTEINFOW {
+        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI,
+        lpFile: PCWSTR(file.as_ptr()),
+        lpDirectory: PCWSTR(dir.as_ptr()),
+        nShow: SW_SHOWNORMAL.0,
+        ..Default::default()
+    };
+
+    unsafe { ShellExecuteExW(&mut info) }.map_err(|e| {
+        // User dismissed the UAC prompt; not an error worth showing
+        if e.code() == HRESULT::from_win32(ERROR_CANCELLED.0) {
+            "cancelled".to_string()
+        } else {
+            e.message().to_string()
+        }
+    })
 }
 
 #[tauri::command]
-fn return_position(app: &tauri::AppHandle) -> () {
+async fn launch_app(exe: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || shell_launch(&exe))
+        .await
+        .map_err(|e| e.to_string())?
+}
 
+fn return_position(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
-        for _ in 1..=2{
-            let _ = win.move_window(Position::BottomCenter);
-            let _ = win.set_size(tauri::Size::Physical(
-                tauri::PhysicalSize::new(650, 210)
-            ));
-        }
+        // Resize first so BottomCenter is computed from the dock size
+        let _ = win.set_size(tauri::Size::Physical(
+            tauri::PhysicalSize::new(650, 210)
+        ));
+        let _ = win.move_window(Position::BottomCenter);
     }
+}
+
+/// Moves the dock directly above the desktop, wherever the desktop is in the stack.
+/// Show Desktop raises Progman and restoring lowers it, but the dock doesn't follow it down.
+unsafe fn place_above_desktop(dock: HWND, progman: HWND) {
+    unsafe {
+        let above_desktop = GetWindow(progman, GW_HWNDPREV).ok();
+        if above_desktop == Some(dock) {
+            return;
+        }
+        // Inserting behind a topmost window could make the dock topmost too
+        let insert_after = above_desktop
+            .filter(|window| GetWindowLongW(*window, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST.0 == 0)
+            .unwrap_or(HWND_TOP);
+        let _ = SetWindowPos(dock, Some(insert_after), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+}
+
+/// Makes the dock an owned window of the desktop (Progman). Windows keeps owned windows
+/// above their owner, so the dock survives desktop clicks while normal windows still cover it.
+fn attach_to_desktop(dock: HWND) -> bool {
+    unsafe {
+        let Ok(progman) = FindWindowW(w!("Progman"), PCWSTR::null()) else {
+            return false;
+        };
+        if !GetWindow(dock, GW_OWNER).is_ok_and(|owner| owner == progman) {
+            SetWindowLongPtrW(dock, GWLP_HWNDPARENT, progman.0 as isize);
+        }
+        place_above_desktop(dock, progman);
+        GetWindow(dock, GW_OWNER).is_ok_and(|owner| owner == progman)
+    }
+}
+
+/// Pins the dock to the desktop, then keeps it there: re-attaches when Explorer restarts and
+/// replaces Progman, and sinks the dock again after Show Desktop is undone.
+fn pin_to_desktop(dock: isize) {
+    if !attach_to_desktop(HWND(dock as *mut _)) {
+        eprintln!("Failed to attach dock to desktop");
+    }
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        attach_to_desktop(HWND(dock as *mut _));
+    });
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -569,12 +710,12 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_positioner::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.set_focus();
             }
         }))
-        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let open_i = MenuItem::with_id(app, "open", "Open AppData", true, None::<&str>)?;
             let refresh_i = MenuItem::with_id(app, "refresh", "Refresh Apps", true, None::<&str>)?;
@@ -584,6 +725,7 @@ pub fn run() {
 
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.move_window(Position::BottomCenter);
+                pin_to_desktop(win.hwnd()?.0 as isize);
             }
 
             let _tray = TrayIconBuilder::new()
@@ -595,8 +737,7 @@ pub fn run() {
                 button_state: MouseButtonState::Up,
                 ..
                 } => {
-                println!("left click pressed and released");
-                // in this example, let's show and focus the main window when the tray is clicked
+                // let's show and focus the main window when the tray is clicked
                 let app = tray.app_handle();
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.unminimize();
@@ -604,9 +745,7 @@ pub fn run() {
                     let _ = window.set_focus();
                 }
                 }
-                _ => {
-                println!("unhandled event {event:?}");
-                }
+                _ => {}
             })
             .on_menu_event(|app, event| match event.id.as_ref() {
                 "open" => {
@@ -620,9 +759,17 @@ pub fn run() {
                     let _ = app.opener().open_path(config_dir, None::<&str>);
                 }
                 "refresh" => {
-                    
-                    return_position(&app);
-                    refresh_apps_impl(&app).unwrap();
+                    // Off the main thread like the refresh_apps command; push the result to the frontend
+                    let app = app.clone();
+                    tauri::async_runtime::spawn_blocking(move || match refresh_apps_impl(&app) {
+                        Ok(apps) => {
+                            let _ = app.emit("apps-updated", apps);
+                        }
+                        Err(err) => {
+                            eprintln!("Failed to refresh apps: {err}");
+                            let _ = app.emit("apps-refresh-failed", err);
+                        }
+                    });
                 }
                 "edit" => {
                         //println!("edit menu item was clicked");
@@ -651,10 +798,10 @@ pub fn run() {
             .icon(app.default_window_icon().unwrap().clone())
             .build(app)?;
             // let handle = app.handle();
-            let json_path = ensure_apps_json(&app.handle())?;
+            ensure_apps_json(&app.handle())?;
             //println!("Using apps.json at: {}", json_path.display());
             // handle cache dir
-            let cache_dir = ensure_icocache_dir(&app.handle())?;
+            ensure_icocache_dir(&app.handle())?;
             //println!("Icon cache directory: {}", cache_dir.display());
             
 

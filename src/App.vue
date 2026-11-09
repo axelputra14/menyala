@@ -4,22 +4,41 @@ import Tooltip from "./components/Tooltip.vue";
 import AppEditor from "./components/AppEditor.vue";
 import { ref, onMounted, onUnmounted } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { useFetchStore } from "./stores/fetch";
+import { AppEntry } from "./types/app";
+
+const fetchStore = useFetchStore();
 
 const tooltipText = ref("");
 const tooltipVisible = ref(false);
 const editorVisible = ref(false);
 
 let unlistenShowEditor: UnlistenFn | undefined;
+let unlistenAppsUpdated: UnlistenFn | undefined;
+let unlistenRefreshFailed: UnlistenFn | undefined;
 
 onMounted(async () => {
   unlistenShowEditor = await listen("show-editor", () => {
     editorVisible.value = true;
+  });
+  // tray "Refresh Apps" runs in the backend and pushes the result here
+  unlistenAppsUpdated = await listen<AppEntry[]>("apps-updated", (event) => {
+    fetchStore.appList = event.payload;
+  });
+  unlistenRefreshFailed = await listen<string>("apps-refresh-failed", (event) => {
+    showError(`Refresh failed: ${event.payload}`);
   });
 });
 
 onUnmounted(() => {
   if (unlistenShowEditor) {
     unlistenShowEditor();
+  }
+  if (unlistenAppsUpdated) {
+    unlistenAppsUpdated();
+  }
+  if (unlistenRefreshFailed) {
+    unlistenRefreshFailed();
   }
 });
 
@@ -31,6 +50,14 @@ function showTooltip(text: string) {
 function hideTooltip() {
   tooltipVisible.value = false;
 }
+
+let errorTimer: ReturnType<typeof setTimeout> | undefined;
+
+function showError(text: string) {
+  clearTimeout(errorTimer);
+  showTooltip(text);
+  errorTimer = setTimeout(hideTooltip, 3000);
+}
 </script>
 
 <template>
@@ -39,7 +66,13 @@ function hideTooltip() {
       <Tooltip :text="tooltipText" :visible="tooltipVisible" />
     </div>
 
-    <Slider @hover="showTooltip" @leave="hideTooltip" />
+    <!-- visibility, not v-if/v-show: the slider keeps its layout for when the editor closes -->
+    <Slider
+      :style="{ visibility: editorVisible ? 'hidden' : 'visible' }"
+      @hover="showTooltip"
+      @leave="hideTooltip"
+      @error="showError"
+    />
 
     <AppEditor :visible="editorVisible" @close="editorVisible = false" />
   </main>
