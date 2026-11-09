@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, nextTick } from "vue";
+import { ref, computed, watch, nextTick } from "vue";
 import { useFetchStore } from "../stores/fetch";
 import { AppEntry } from "../types/app";
 import { invoke } from "@tauri-apps/api/core";
@@ -15,6 +15,13 @@ const fetchStore = useFetchStore();
 const localApps = ref<AppEntry[]>([]);
 const isSaving = ref(false);
 const errorMsg = ref("");
+const confirmingDiscard = ref(false);
+// serialized list as it was when the editor opened, to detect unsaved edits
+const snapshot = ref("");
+
+const isDirty = computed(
+    () => JSON.stringify(localApps.value) !== snapshot.value,
+);
 
 // Initialize local list from store when modal opens
 watch(
@@ -25,7 +32,9 @@ watch(
                 ...app,
                 id: app.id ?? crypto.randomUUID(),
             }));
+            snapshot.value = JSON.stringify(localApps.value);
             errorMsg.value = "";
+            confirmingDiscard.value = false;
         }
     },
     { immediate: true },
@@ -94,8 +103,18 @@ async function resetPos() {
 
 // every way of dismissing the editor must also shrink/reposition the window
 function closeEditor() {
+    confirmingDiscard.value = false;
     emit("close");
     resetPos();
+}
+
+// dismiss requests (overlay click, ×, Cancel) ask first when there are unsaved edits
+function requestClose() {
+    if (isDirty.value) {
+        confirmingDiscard.value = true;
+        return;
+    }
+    closeEditor();
 }
 
 async function selectExeFile(app: AppEntry) {
@@ -123,13 +142,33 @@ async function selectExeFile(app: AppEntry) {
 
 <template>
     <Transition name="fade">
-        <div v-if="visible" class="editor-overlay" @click.self="closeEditor">
+        <div v-if="visible" class="editor-overlay" @click.self="requestClose">
             <div class="editor-modal">
                 <div class="editor-header">
                     <h2>Manage Applications</h2>
-                    <button class="btn-close" @click="closeEditor">
+                    <button
+                        class="btn-close"
+                        title="Close"
+                        aria-label="Close"
+                        @click="requestClose"
+                    >
                         &times;
                     </button>
+                </div>
+
+                <div v-if="confirmingDiscard" class="discard-banner">
+                    <span>You have unsaved changes. Discard them?</span>
+                    <div class="discard-actions">
+                        <button
+                            class="btn-ghost"
+                            @click="confirmingDiscard = false"
+                        >
+                            Keep editing
+                        </button>
+                        <button class="btn-danger" @click="closeEditor">
+                            Discard
+                        </button>
+                    </div>
                 </div>
 
                 <div v-if="errorMsg" class="error-banner">
@@ -184,27 +223,35 @@ async function selectExeFile(app: AppEntry) {
                             </div>
                             <div class="input-group full-width">
                                 <label>Executable Path</label>
-                                <input
-                                    type="text"
-                                    v-model="app.exe"
-                                    placeholder="C:\Path\to\app.exe"
-                                />
-                                <button v-on:click="selectExeFile(app)">
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        width="1em"
-                                        height="1em"
-                                        viewBox="0 0 36 36"
+                                <div class="path-row">
+                                    <input
+                                        type="text"
+                                        v-model="app.exe"
+                                        placeholder="C:\Path\to\app.exe"
+                                    />
+                                    <button
+                                        type="button"
+                                        class="btn-browse"
+                                        title="Browse for executable"
+                                        aria-label="Browse for executable"
+                                        @click="selectExeFile(app)"
                                     >
-                                        <path d="M0 0h36v36H0z" fill="none" />
-                                        <path
-                                            fill="currentColor"
-                                            d="M35.32 13.74a1.71 1.71 0 0 0-1.45-.74h-22.7a2.59 2.59 0 0 0-2.25 1.52a1 1 0 0 0 0 .14L6 25V7h6.49l2.61 3.59a1 1 0 0 0 .81.41H32a2 2 0 0 0-2-2H16.42l-2.31-3.18A2 2 0 0 0 12.49 5H6a2 2 0 0 0-2 2v22.69A1.37 1.37 0 0 0 5.41 31h24.93a1 1 0 0 0 1-.72l4.19-15.1a1.64 1.64 0 0 0-.21-1.44"
-                                            class="clr-i-solid clr-i-solid-path-1"
-                                        />
-                                        <path fill="none" d="M0 0h36v36H0z" />
-                                    </svg>
-                                </button>
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            width="1em"
+                                            height="1em"
+                                            viewBox="0 0 36 36"
+                                        >
+                                            <path d="M0 0h36v36H0z" fill="none" />
+                                            <path
+                                                fill="currentColor"
+                                                d="M35.32 13.74a1.71 1.71 0 0 0-1.45-.74h-22.7a2.59 2.59 0 0 0-2.25 1.52a1 1 0 0 0 0 .14L6 25V7h6.49l2.61 3.59a1 1 0 0 0 .81.41H32a2 2 0 0 0-2-2H16.42l-2.31-3.18A2 2 0 0 0 12.49 5H6a2 2 0 0 0-2 2v22.69A1.37 1.37 0 0 0 5.41 31h24.93a1 1 0 0 0 1-.72l4.19-15.1a1.64 1.64 0 0 0-.21-1.44"
+                                                class="clr-i-solid clr-i-solid-path-1"
+                                            />
+                                            <path fill="none" d="M0 0h36v36H0z" />
+                                        </svg>
+                                    </button>
+                                </div>
                             </div>
                         </div>
 
@@ -229,7 +276,7 @@ async function selectExeFile(app: AppEntry) {
                         + Add Application
                     </button>
                     <div class="footer-right">
-                        <button class="btn-ghost" @click="closeEditor">
+                        <button class="btn-ghost" @click="requestClose">
                             Cancel
                         </button>
                         <button
@@ -246,26 +293,8 @@ async function selectExeFile(app: AppEntry) {
     </Transition>
 </template>
 
-<style>
-.list-move, /* apply transition to moving elements */
-.list-enter-active,
-.list-leave-active {
-    transition: all 0.5s cubic-bezier(0.55, 0, 0.1, 1);
-}
-
-.list-enter-from,
-.list-leave-to {
-    opacity: 0;
-    transform: scaleY(0.01) translate(30px, 0);
-}
-
-/* ensure leaving items are taken out of layout flow so that moving
-   animations can be calculated correctly. */
-.list-leave-active {
-    position: absolute;
-}
-
-/* Animations */
+<style scoped>
+/* open/close fade for the overlay */
 .fade-enter-active,
 .fade-leave-active {
     transition: opacity 0.5s cubic-bezier(0.55, 0, 0.1, 1);
@@ -274,17 +303,8 @@ async function selectExeFile(app: AppEntry) {
 .fade-enter-from,
 .fade-leave-to {
     opacity: 0;
-    transform: scaleY(0.01) translate(30px, 0);
 }
-</style>
 
-<style scoped>
-.apps-group {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-    position: relative;
-}
 .editor-overlay {
     position: fixed;
     top: 0;
@@ -297,7 +317,6 @@ async function selectExeFile(app: AppEntry) {
     display: flex;
     justify-content: center;
     align-items: center;
-    animation: fadeIn 0.5s ease-out;
 }
 
 .editor-modal {
@@ -353,6 +372,44 @@ async function selectExeFile(app: AppEntry) {
     margin: 0.5rem 1.5rem 0;
     border-radius: 0.375rem;
     font-size: 0.875rem;
+}
+
+.discard-banner {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    background: rgba(234, 179, 8, 0.15);
+    border-left: 4px solid #eab308;
+    color: #fde68a;
+    padding: 0.5rem 0.75rem 0.5rem 1.25rem;
+    margin: 0.5rem 1.5rem 0;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+}
+
+.discard-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-shrink: 0;
+}
+
+.btn-danger {
+    font-family: inherit;
+    font-size: 0.875rem;
+    font-weight: 500;
+    border-radius: 0.5rem;
+    padding: 0.4rem 0.9rem;
+    cursor: pointer;
+    background: #ef4444;
+    border: 1px solid #ef4444;
+    color: #fff;
+    transition: background 0.15s;
+}
+
+.btn-danger:hover {
+    background: #dc2626;
+    border-color: #dc2626;
 }
 
 .editor-list {
@@ -465,6 +522,38 @@ async function selectExeFile(app: AppEntry) {
     outline: none;
     border-color: rgba(99, 102, 241, 0.6);
     box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+}
+
+.path-row {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.path-row input {
+    flex: 1;
+    min-width: 0;
+}
+
+.btn-browse {
+    flex-shrink: 0;
+    width: 2.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 0.375rem;
+    color: #9ca3af;
+    font-size: 1rem;
+    cursor: pointer;
+    transition:
+        background 0.15s,
+        color 0.15s;
+}
+
+.btn-browse:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
 }
 
 .card-actions {
