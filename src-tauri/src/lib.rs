@@ -737,8 +737,7 @@ pub fn run() {
                 button_state: MouseButtonState::Up,
                 ..
                 } => {
-                println!("left click pressed and released");
-                // in this example, let's show and focus the main window when the tray is clicked
+                // let's show and focus the main window when the tray is clicked
                 let app = tray.app_handle();
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.unminimize();
@@ -746,9 +745,7 @@ pub fn run() {
                     let _ = window.set_focus();
                 }
                 }
-                _ => {
-                println!("unhandled event {event:?}");
-                }
+                _ => {}
             })
             .on_menu_event(|app, event| match event.id.as_ref() {
                 "open" => {

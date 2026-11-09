@@ -4,6 +4,7 @@ import { useFetchStore } from "../stores/fetch";
 import { AppEntry } from "../types/app";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { useDraggable, type DraggableEvent } from "vue-draggable-plus";
 
 const props = defineProps<{
     visible: boolean;
@@ -18,6 +19,10 @@ const errorMsg = ref("");
 const confirmingDiscard = ref(false);
 // serialized list as it was when the editor opened, to detect unsaved edits
 const snapshot = ref("");
+// cards picked for a multi-drag, by app id
+const selectedIds = ref(new Set<string>());
+// card the last Ctrl/Shift+click landed on, where a Shift+click range starts
+let selectionAnchor: string | null = null;
 
 const isDirty = computed(
     () => JSON.stringify(localApps.value) !== snapshot.value,
@@ -35,6 +40,8 @@ watch(
             snapshot.value = JSON.stringify(localApps.value);
             errorMsg.value = "";
             confirmingDiscard.value = false;
+            selectedIds.value = new Set();
+            selectionAnchor = null;
             window.addEventListener("keydown", onKeydown);
         } else {
             window.removeEventListener("keydown", onKeydown);
@@ -45,12 +52,170 @@ watch(
 
 onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 
-// Esc backs out of the discard prompt or asks to close; Ctrl+S saves
+// ---- multi-select: Ctrl+click toggles a card, Shift+click selects a range ----
+const selectedCount = computed(
+    () => localApps.value.filter((a) => selectedIds.value.has(a.id!)).length,
+);
+
+function onCardClick(e: MouseEvent, app: AppEntry) {
+    if (!e.ctrlKey && !e.shiftKey) return;
+    // leave modifier-clicks inside form controls alone (Shift+click in a text field, etc.)
+    if ((e.target as HTMLElement).closest("input, button, label")) return;
+    e.preventDefault();
+    const id = app.id!;
+    const next = new Set(selectedIds.value);
+    if (e.shiftKey && selectionAnchor) {
+        const ids = localApps.value.map((a) => a.id!);
+        const from = ids.indexOf(selectionAnchor);
+        const to = ids.indexOf(id);
+        if (from !== -1 && to !== -1) {
+            const [lo, hi] = from < to ? [from, to] : [to, from];
+            ids.slice(lo, hi + 1).forEach((i) => next.add(i));
+        }
+    } else if (next.has(id)) {
+        next.delete(id);
+    } else {
+        next.add(id);
+    }
+    selectionAnchor = id;
+    selectedIds.value = next;
+}
+
+// ---- drag reordering (vue-draggable-plus, pointer-based) ----
+const listRef = ref<HTMLElement | null>(null);
+const draggingId = ref<string | null>(null);
+// true while a selected card is dragged with other selected cards along with it
+const isGroupDrag = computed(
+    () =>
+        draggingId.value !== null &&
+        selectedIds.value.has(draggingId.value) &&
+        selectedCount.value > 1,
+);
+
+let dragStartPoint: { x: number; y: number } | null = null;
+
+// Sortable attaches the triggering pointer event at runtime, but its typings leave it out
+function pointOf(e: DraggableEvent<AppEntry>) {
+    const p = (e as { originalEvent?: PointerEvent }).originalEvent;
+    return p && typeof p.clientX === "number"
+        ? { x: p.clientX, y: p.clientY }
+        : null;
+}
+
+// a press-and-release on the handle can still fire start/end; only a real drag should regroup
+function pointerTravelled(e: DraggableEvent<AppEntry>): boolean {
+    const end = pointOf(e);
+    if (!dragStartPoint || !end) return true;
+    return Math.hypot(end.x - dragStartPoint.x, end.y - dragStartPoint.y) > 4;
+}
+
+const sortable = useDraggable<AppEntry>(listRef, {
+    immediate: false,
+    handle: ".drag-handle",
+    draggable: ".app-edit-card",
+    // pointer events instead of HTML5 drag, which Tauri's file-drop handling swallows on Windows
+    forceFallback: true,
+    animation: 250,
+    ghostClass: "drag-placeholder",
+    fallbackClass: "drag-floating",
+    onStart: (e: DraggableEvent<AppEntry>) => {
+        draggingId.value = e.item.dataset.id ?? null;
+        dragStartPoint = pointOf(e);
+    },
+    onEnd: onDragEnd,
+});
+
+// the list only exists while the editor is open (v-if), so attach Sortable when it appears
+watch(
+    listRef,
+    (el) => {
+        if (el) sortable.start(el);
+        else sortable.destroy();
+    },
+    { flush: "post" },
+);
+
+function cardRects(): Map<string, DOMRect> {
+    const rects = new Map<string, DOMRect>();
+    listRef.value
+        ?.querySelectorAll<HTMLElement>(".app-edit-card")
+        .forEach((el) => rects.set(el.dataset.id!, el.getBoundingClientRect()));
+    return rects;
+}
+
+// slide each card from where it was on screen to where Vue just put it (FLIP)
+function animateFrom(before: Map<string, DOMRect>) {
+    listRef.value
+        ?.querySelectorAll<HTMLElement>(".app-edit-card")
+        .forEach((el) => {
+            const prev = before.get(el.dataset.id!);
+            if (!prev) return;
+            const now = el.getBoundingClientRect();
+            const dx = prev.left - now.left;
+            const dy = prev.top - now.top;
+            if (!dx && !dy) return;
+            el.style.transition = "none";
+            el.style.transform = `translate(${dx}px, ${dy}px)`;
+            el.getBoundingClientRect(); // commit the start position before animating
+            el.style.transition = "transform 0.25s ease";
+            el.style.transform = "";
+            el.addEventListener(
+                "transitionend",
+                () => (el.style.transition = ""),
+                { once: true },
+            );
+        });
+}
+
+async function onDragEnd(e: DraggableEvent<AppEntry>) {
+    const draggedId = draggingId.value;
+    const group = isGroupDrag.value && pointerTravelled(e);
+    draggingId.value = null;
+    dragStartPoint = null;
+    const oldIndex = e.oldDraggableIndex;
+    const newIndex = e.newDraggableIndex;
+    if (!draggedId || oldIndex === undefined || newIndex === undefined) return;
+    if (oldIndex === newIndex && !group) return;
+
+    const before = cardRects();
+
+    // Sortable moved the element itself; put it back so Vue stays the one that owns DOM order
+    if (oldIndex !== newIndex) {
+        const parent = e.from;
+        parent.removeChild(e.item);
+        const cards = parent.querySelectorAll(".app-edit-card");
+        parent.insertBefore(e.item, cards[oldIndex] ?? null);
+    }
+
+    // order with only the dragged card moved, as Sortable showed it
+    const order = [...localApps.value];
+    const [dragged] = order.splice(oldIndex, 1);
+    order.splice(newIndex, 0, dragged);
+
+    if (group) {
+        // gather the other selected cards around the dragged one, keeping their relative order
+        const block = localApps.value.filter((a) => selectedIds.value.has(a.id!));
+        const rest = order.filter(
+            (a) => a.id === draggedId || !selectedIds.value.has(a.id!),
+        );
+        rest.splice(rest.indexOf(dragged), 1, ...block);
+        localApps.value = rest;
+    } else {
+        localApps.value = order;
+    }
+
+    await nextTick();
+    animateFrom(before);
+}
+
+// Esc backs out of the discard prompt, then clears the selection, then asks to close; Ctrl+S saves
 function onKeydown(e: KeyboardEvent) {
     if (e.key === "Escape") {
         e.preventDefault();
         if (confirmingDiscard.value) {
             confirmingDiscard.value = false;
+        } else if (selectedCount.value > 0) {
+            selectedIds.value = new Set();
         } else {
             requestClose();
         }
@@ -72,9 +237,8 @@ function addApp() {
     });
     // Auto-scroll list to bottom after adding
     nextTick(() => {
-        const listContainer = document.querySelector(".editor-list");
-        if (listContainer) {
-            listContainer.scrollTop = listContainer.scrollHeight;
+        if (listRef.value) {
+            listRef.value.scrollTop = listRef.value.scrollHeight;
         }
     });
 }
@@ -170,6 +334,9 @@ async function selectExeFile(app: AppEntry) {
             <div class="editor-modal">
                 <div class="editor-header">
                     <h2>Manage Applications</h2>
+                    <span v-if="selectedCount > 0" class="selection-pill">
+                        {{ selectedCount }} selected · Esc to clear
+                    </span>
                     <button
                         class="btn-close"
                         title="Close"
@@ -199,13 +366,49 @@ async function selectExeFile(app: AppEntry) {
                     {{ errorMsg }}
                 </div>
 
-                <div class="editor-list hide-scrollbar">
+                <div ref="listRef" class="editor-list hide-scrollbar">
                     <div
                         v-for="(app, index) in localApps"
                         :key="app.id"
+                        :data-id="app.id"
                         class="app-edit-card"
+                        :class="{
+                            'is-selected': selectedIds.has(app.id!),
+                            'is-companion':
+                                isGroupDrag &&
+                                selectedIds.has(app.id!) &&
+                                app.id !== draggingId,
+                        }"
+                        @click="onCardClick($event, app)"
                     >
+                        <span
+                            v-if="isGroupDrag && app.id === draggingId"
+                            class="group-badge"
+                        >
+                            {{ selectedCount }}
+                        </span>
                         <div class="card-left">
+                            <div
+                                class="drag-handle"
+                                title="Drag to reorder · Ctrl/Shift+click to select several"
+                            >
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    width="10"
+                                    height="16"
+                                    viewBox="0 0 10 16"
+                                    aria-hidden="true"
+                                >
+                                    <g fill="currentColor">
+                                        <circle cx="2" cy="2" r="1.5" />
+                                        <circle cx="8" cy="2" r="1.5" />
+                                        <circle cx="2" cy="8" r="1.5" />
+                                        <circle cx="8" cy="8" r="1.5" />
+                                        <circle cx="2" cy="14" r="1.5" />
+                                        <circle cx="8" cy="14" r="1.5" />
+                                    </g>
+                                </svg>
+                            </div>
                             <div class="reorder-controls">
                                 <button
                                     class="btn-arrow"
@@ -477,6 +680,91 @@ async function selectExeFile(app: AppEntry) {
 .app-edit-card:hover {
     background: rgba(255, 255, 255, 0.07);
     border-color: rgba(255, 255, 255, 0.15);
+}
+
+.app-edit-card {
+    position: relative; /* anchors the group badge */
+    user-select: none; /* Shift+click selects cards, not text */
+}
+
+.app-edit-card input {
+    user-select: text;
+}
+
+.app-edit-card.is-selected {
+    background: rgba(99, 102, 241, 0.12);
+    border-color: rgba(99, 102, 241, 0.6);
+}
+
+/* other selected cards while one of them is dragged; they join it on drop */
+.app-edit-card.is-companion {
+    opacity: 0.35;
+}
+
+/* the card's slot in the list while it is being dragged */
+.app-edit-card.drag-placeholder {
+    opacity: 0.3;
+    border-style: dashed;
+    border-color: rgba(99, 102, 241, 0.7);
+}
+
+/* the copy that follows the cursor */
+.app-edit-card.drag-floating {
+    opacity: 0.95 !important;
+    background: rgba(30, 30, 45, 0.95);
+    border-color: rgba(99, 102, 241, 0.7);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+
+.group-badge {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 6px;
+    border-radius: 11px;
+    background: #6366f1;
+    color: #fff;
+    font-size: 0.75rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.5);
+}
+
+.drag-handle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 32px;
+    border-radius: 4px;
+    color: #6b7280;
+    cursor: grab;
+    transition:
+        background 0.25s,
+        color 0.25s;
+}
+
+.drag-handle:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #f3f4f6;
+}
+
+.drag-handle:active {
+    cursor: grabbing;
+}
+
+.selection-pill {
+    margin-left: auto;
+    margin-right: 0.75rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    background: rgba(99, 102, 241, 0.18);
+    color: #c7d2fe;
+    font-size: 0.75rem;
 }
 
 .card-left {
