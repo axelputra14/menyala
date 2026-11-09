@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from "vue";
+import { ref, computed, watch, nextTick, onUnmounted } from "vue";
 import { useFetchStore } from "../stores/fetch";
 import { AppEntry } from "../types/app";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 
 const props = defineProps<{
@@ -35,10 +35,32 @@ watch(
             snapshot.value = JSON.stringify(localApps.value);
             errorMsg.value = "";
             confirmingDiscard.value = false;
+            window.addEventListener("keydown", onKeydown);
+        } else {
+            window.removeEventListener("keydown", onKeydown);
         }
     },
     { immediate: true },
 );
+
+onUnmounted(() => window.removeEventListener("keydown", onKeydown));
+
+// Esc backs out of the discard prompt or asks to close; Ctrl+S saves
+function onKeydown(e: KeyboardEvent) {
+    if (e.key === "Escape") {
+        e.preventDefault();
+        if (confirmingDiscard.value) {
+            confirmingDiscard.value = false;
+        } else {
+            requestClose();
+        }
+    } else if (e.ctrlKey && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        if (isDirty.value && !isSaving.value) {
+            saveChanges();
+        }
+    }
+}
 
 function addApp() {
     localApps.value.push({
@@ -133,6 +155,8 @@ async function selectExeFile(app: AppEntry) {
         // null means the user cancelled the dialog, so keep the existing path
         if (file) {
             app.exe = file;
+            // old icon belongs to the previous exe; refresh_apps resolves the new one on save
+            app.icon = null;
         }
     } catch (error) {
         console.error("Error selecting file:", error);
@@ -200,21 +224,34 @@ async function selectExeFile(app: AppEntry) {
                                     ▼
                                 </button>
                             </div>
+                            <img
+                                class="card-icon"
+                                :src="
+                                    app.icon
+                                        ? convertFileSrc(app.icon)
+                                        : '/tauri.svg'
+                                "
+                                alt=""
+                            />
                         </div>
 
                         <div class="card-inputs">
                             <div class="input-row">
                                 <div class="input-group">
-                                    <label>Name</label>
+                                    <label :for="`${app.id}-name`">Name</label>
                                     <input
+                                        :id="`${app.id}-name`"
                                         type="text"
                                         v-model="app.name"
                                         placeholder="e.g. VS Code"
                                     />
                                 </div>
                                 <div class="input-group">
-                                    <label>Publisher</label>
+                                    <label :for="`${app.id}-publisher`"
+                                        >Publisher</label
+                                    >
                                     <input
+                                        :id="`${app.id}-publisher`"
                                         type="text"
                                         v-model="app.publisher"
                                         placeholder="e.g. Microsoft"
@@ -222,9 +259,12 @@ async function selectExeFile(app: AppEntry) {
                                 </div>
                             </div>
                             <div class="input-group full-width">
-                                <label>Executable Path</label>
+                                <label :for="`${app.id}-exe`"
+                                    >Executable Path</label
+                                >
                                 <div class="path-row">
                                     <input
+                                        :id="`${app.id}-exe`"
                                         type="text"
                                         v-model="app.exe"
                                         placeholder="C:\Path\to\app.exe"
@@ -281,7 +321,7 @@ async function selectExeFile(app: AppEntry) {
                         </button>
                         <button
                             class="btn-primary"
-                            :disabled="isSaving"
+                            :disabled="isSaving || !isDirty"
                             @click="saveChanges"
                         >
                             {{ isSaving ? "Saving..." : "Save Changes" }}
@@ -357,7 +397,7 @@ async function selectExeFile(app: AppEntry) {
     cursor: pointer;
     padding: 4px;
     line-height: 1;
-    transition: color 0.5s;
+    transition: color 0.25s;
 }
 
 .btn-close:hover {
@@ -404,7 +444,7 @@ async function selectExeFile(app: AppEntry) {
     background: #ef4444;
     border: 1px solid #ef4444;
     color: #fff;
-    transition: background 0.15s;
+    transition: background 0.25s;
 }
 
 .btn-danger:hover {
@@ -430,8 +470,8 @@ async function selectExeFile(app: AppEntry) {
     padding: 1rem;
     gap: 1rem;
     transition:
-        background 0.5s,
-        border-color 0.5s;
+        background 0.25s,
+        border-color 0.25s;
 }
 
 .app-edit-card:hover {
@@ -442,6 +482,14 @@ async function selectExeFile(app: AppEntry) {
 .card-left {
     display: flex;
     align-items: center;
+    gap: 0.75rem;
+}
+
+.card-icon {
+    width: 40px;
+    height: 40px;
+    object-fit: contain;
+    flex-shrink: 0;
 }
 
 .reorder-controls {
@@ -462,7 +510,7 @@ async function selectExeFile(app: AppEntry) {
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all 0.5s;
+    transition: all 0.25s;
 }
 
 .btn-arrow:hover:not(:disabled) {
@@ -514,8 +562,8 @@ async function selectExeFile(app: AppEntry) {
     font-family: inherit;
     font-size: 0.875rem;
     transition:
-        border-color 0.5s,
-        box-shadow 0.5s;
+        border-color 0.25s,
+        box-shadow 0.25s;
 }
 
 .input-group input:focus {
@@ -547,8 +595,8 @@ async function selectExeFile(app: AppEntry) {
     font-size: 1rem;
     cursor: pointer;
     transition:
-        background 0.15s,
-        color 0.15s;
+        background 0.25s,
+        color 0.25s;
 }
 
 .btn-browse:hover {
@@ -569,7 +617,7 @@ async function selectExeFile(app: AppEntry) {
     padding: 0.5rem 0.75rem;
     font-size: 0.825rem;
     cursor: pointer;
-    transition: all 0.5s;
+    transition: all 0.25s;
 }
 
 .btn-delete:hover {
@@ -608,7 +656,7 @@ async function selectExeFile(app: AppEntry) {
     border-radius: 0.5rem;
     padding: 0.5rem 1rem;
     cursor: pointer;
-    transition: all 0.5s;
+    transition: all 0.25s;
 }
 
 .btn-primary {
